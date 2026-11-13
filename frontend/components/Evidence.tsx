@@ -30,12 +30,12 @@ export default function EvidenceStrength({ sources, dark = false }: { sources: P
   const s = strengthOf(sources);
   return (
     <span
-      className={`ml-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 align-[0.1em] font-mono text-[10.5px] ${dark ? "bg-white/10 text-lilac" : "bg-ground text-muted ring-1 ring-line"}`}
+      className={`ml-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 align-[0.1em] text-caption font-medium ${dark ? "bg-white/10 text-lilac" : "bg-ground text-muted ring-1 ring-line"}`}
       title={`Evidence: ${s.detail}. How well-sourced this claim is, not a rating of the stock.`}
     >
       <span aria-hidden="true" className="inline-flex gap-0.5">
         {[0, 1, 2].map((i) => (
-          <span key={i} className={`h-1.5 w-1.5 rounded-full ${i <= s.level ? (dark ? "bg-haldi" : "bg-neel") : dark ? "bg-white/20" : "bg-line-2"}`} />
+          <span key={i} className={`h-1 w-2.5 rounded-full ${i <= s.level ? (dark ? "bg-haldi" : "bg-neel") : dark ? "bg-white/20" : "bg-line-2"}`} />
         ))}
       </span>
       {s.label}

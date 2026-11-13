@@ -3,25 +3,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Citation from "@/components/Citation";
 import EvidenceStrength from "@/components/Evidence";
-import AnimatedList from "@/components/reactbits/AnimatedList";
-import BorderGlow from "@/components/reactbits/BorderGlow";
 import CountUp from "@/components/reactbits/CountUp";
-import LatticeLoader from "@/components/reactbits/LatticeLoader";
+import StatusBadge from "@/components/StatusBadge";
+import { AgentAvatar } from "@/components/council/Robot";
 
-/** BorderGlow tuned to the brand: a Neel-to-Haldi edge light on white paper cards. */
-export const GLOW = {
-  backgroundColor: "#FFFFFF",
-  glowColor: "243 58 62",
-  colors: ["#4338CA", "#D97706", "#C7C3F4"],
-  glowIntensity: 0.9,
-  edgeSensitivity: 26,
-  glowRadius: 32,
-  coneSpread: 22,
-  fillOpacity: 0.35,
-};
 import type { AgentKey, AgentState, Argument, Chief, Council as CouncilT, EarningsCall, Evidence, Fundamentals, News } from "@/lib/council";
 
-const EASE = [0.16, 1, 0.3, 1] as const;
+const SPRING = { type: "spring", bounce: 0, duration: 0.4 } as const; // critically damped, Apple's default
 
 /* ---------- small pieces ---------- */
 
@@ -36,36 +24,8 @@ export function Typing({ tone = "ink" }: { tone?: "ink" | "neel" | "haldi" }) {
   );
 }
 
-/** React Bits LatticeLoader: a lattice wave + live stopwatch while the agent works, then a check (or cross)
- *  with the frozen time. Replays never show a stopwatch: their pacing isn't model time. */
-function StatusChip({ s, seconds, tone = "neel" }: { s: AgentState; seconds?: number; tone?: "neel" | "haldi" | "light" }) {
-  if (s.status === "waiting") return <span className="rounded-full border border-line px-2.5 py-1 font-mono text-[11px] text-muted">waiting</span>;
-  const ink = tone === "light" ? "#C7C3F4" : tone === "haldi" ? "#B45309" : "#4338CA";
-  return (
-    <span className={`rounded-full px-2.5 py-1 ${tone === "light" ? "bg-white/10" : s.status === "done" ? "bg-verified-tint" : s.status === "error" ? "bg-firewall-tint" : tone === "haldi" ? "bg-haldi-tint" : "bg-neel-tint"}`}>
-      <LatticeLoader
-        status={s.status === "running" ? "working" : s.status}
-        label="Working"
-        doneLabel={seconds !== undefined ? "Done in" : "Done"}
-        errorLabel="Failed"
-        showTimer={!s.simulated}
-        elapsed={s.status === "done" && seconds !== undefined ? seconds : undefined}
-        color={s.status === "done" ? (tone === "light" ? "#A8E3B8" : "#15803D") : s.status === "error" ? "#92400E" : ink}
-        doneColor={tone === "light" ? "#A8E3B8" : "#15803D"}
-        errorColor="#92400E"
-        pattern="orbit"
-        cellSize={4}
-        gap={2}
-        fontSize={12}
-        idleOpacity={0.2}
-      />
-    </span>
-  );
-}
-
-function Avatar({ mono, tone }: { mono: string; tone: "ink" | "neel" | "haldi" | "line" }) {
-  const c = { ink: "bg-ink text-ground", neel: "bg-neel text-white", haldi: "bg-haldi text-ink", line: "bg-line text-ink-2" }[tone];
-  return <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-full font-display text-lg font-semibold ${c}`}>{mono}</span>;
+function StatusChip({ s, seconds, tone }: { s: AgentState; seconds?: number; tone?: "neel" | "haldi" | "light" }) {
+  return <StatusBadge status={s.status} seconds={seconds} dark={tone === "light"} />;
 }
 
 const secs = (s: AgentState) => (s.start && s.end && !s.simulated ? (s.end - s.start) / 1000 : undefined); // never show replay pacing as model time
@@ -93,10 +53,9 @@ export function AnalystCard({ k, name, role, mono, s }: { k: AgentKey; name: str
   const overall = k === "news" && s.data && typeof s.data === "object" && "overall" in (s.data as object) ? (s.data as News).overall : null;
   const tone = k === "earnings_call" && s.data && typeof s.data === "object" && "tone" in (s.data as object) ? (s.data as EarningsCall).tone : null;
   return (
-    <BorderGlow {...GLOW} borderRadius={28} className={`glow-open h-full ${s.status === "running" ? "ring-4 ring-neel/10" : ""}`}>
-    <motion.article layout={!reduce} className="flex h-full flex-col p-5">
+    <motion.article layout={!reduce} className={`flex h-full flex-col rounded-[28px] border bg-paper p-5 transition-colors ${s.status === "running" ? "border-neel/40" : "border-line"}`}>
       <header className="flex items-center gap-3">
-        <Avatar mono={mono} tone={s.status === "waiting" ? "line" : "ink"} />
+        <AgentAvatar k={k} state={s.status} />
         <div className="min-w-0 flex-1">
           <h3 className="font-display text-lg font-semibold leading-tight">{name}</h3>
           <p className="truncate text-sm text-muted">{role}</p>
@@ -111,10 +70,10 @@ export function AnalystCard({ k, name, role, mono, s }: { k: AgentKey; name: str
                 key={i}
                 initial={reduce ? false : { opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: i * 0.08, ease: EASE }}
-                className="text-[15px] leading-snug text-ink"
+                transition={{ ...SPRING, delay: i * 0.08 }}
+                className="text-base leading-snug text-ink"
               >
-                {f.flag && <span className="mr-1.5 rounded bg-firewall-tint px-1.5 py-0.5 font-mono text-[10px] text-firewall uppercase">red flag</span>}
+                {f.flag && <span className="mr-1.5 rounded bg-firewall-tint px-1.5 py-0.5 kicker text-firewall">red flag</span>}
                 {f.claim}
                 <Citation n={i + 1} item={evidenceItem(f.e)} />
               </motion.li>
@@ -153,7 +112,6 @@ export function AnalystCard({ k, name, role, mono, s }: { k: AgentKey; name: str
         </footer>
       )}
     </motion.article>
-    </BorderGlow>
   );
 }
 
@@ -166,20 +124,20 @@ function Bubble({ a, side, idx, reply }: { a: Argument; side: "bull" | "bear"; i
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 14, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.6, delay: idx * 0.09, ease: EASE }}
+      transition={{ ...SPRING, delay: idx * 0.09 }}
       className={`${reply ? "ml-6 border-l-2 pl-4 " + (bull ? "border-neel/30" : "border-haldi/40") : ""}`}
     >
       <div
-        className={`rounded-3xl px-5 py-4 text-[15px] leading-relaxed ${
+        className={`rounded-3xl px-5 py-4 text-base leading-relaxed ${
           reply ? "bg-paper text-ink-2" : bull ? "rounded-tl-md bg-neel-tint text-ink" : "rounded-tr-md bg-haldi-tint text-ink"
         }`}
       >
         {reply && a.answers && (
-          <span className="mb-1 block font-mono text-[11px] text-muted">
+          <span className="mb-1 block text-caption text-muted">
             answers {bull ? "the Bear's" : "the Bull's"} point {a.answers}
           </span>
         )}
-        {!reply && <span className={`mr-2 font-mono text-[11px] ${bull ? "text-neel" : "text-haldi-text"}`}>A{idx + 1}</span>}
+        {!reply && <span className={`mr-2 text-caption ${bull ? "text-neel" : "text-haldi-text"}`}>A{idx + 1}</span>}
         {a.point}
         {a.sources.map((s, i) => (
           <Citation key={i} n={i + 1} item={s} tone={bull ? "neel" : "haldi"} />
@@ -197,7 +155,7 @@ export function DebateColumn({ side, main, replies }: { side: "bull" | "bear"; m
   return (
     <section aria-label={bull ? "The case for" : "The case against"} className="flex flex-col gap-3">
       <header className={`flex items-center gap-3 ${bull ? "" : "md:flex-row-reverse md:text-right"}`}>
-        <Avatar mono="B" tone={main.status === "waiting" ? "line" : bull ? "neel" : "haldi"} />
+        <AgentAvatar k={bull ? "bull_case" : "bear_case"} state={main.status} />
         <div className="flex-1">
           <h3 className={`font-display text-2xl font-semibold ${bull ? "text-neel" : "text-haldi-text"}`}>{bull ? "The Bull" : "The Bear"}</h3>
           <p className="text-sm text-muted">{bull ? "The strongest case for" : "The strongest case against"}</p>
@@ -232,10 +190,10 @@ export function Verdict({ chief, risks }: { chief: AgentState; risks: AgentState
   const c = chief.data as Chief | undefined;
   const rs = (Array.isArray(risks.data) ? risks.data : []) as Argument[];
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
+    <div className="grid items-start gap-5 lg:grid-cols-[1.35fr_1fr]">
       <section aria-label="Bottom line" className="relative overflow-hidden rounded-[32px] bg-ink p-7 text-ground sm:p-10">
         <div className="flex items-center gap-3">
-          <Avatar mono="C" tone={chief.status === "waiting" ? "line" : "haldi"} />
+          <AgentAvatar k="chief" state={chief.status} />
           <div className="flex-1">
             <h3 className="font-display text-xl font-semibold">The bottom line</h3>
             <p className="text-sm text-lilac">From the Chief, weighing both sides</p>
@@ -246,10 +204,10 @@ export function Verdict({ chief, risks }: { chief: AgentState; risks: AgentState
           {c?.bottom_line ? (
             <motion.p
               key="bl"
-              initial={reduce ? false : { opacity: 0, y: 18, filter: "blur(8px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              transition={{ duration: 1.1, ease: EASE }}
-              className="mt-7 font-display text-[clamp(1.35rem,2.4vw,2rem)] leading-[1.3] font-medium tracking-[-0.01em]"
+              initial={reduce ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={SPRING}
+              className="mt-7 font-display text-[clamp(1.2rem,1.9vw,1.55rem)] leading-[1.45] font-medium tracking-[-0.011em]"
             >
               {c.bottom_line}
             </motion.p>
@@ -263,27 +221,21 @@ export function Verdict({ chief, risks }: { chief: AgentState; risks: AgentState
         </AnimatePresence>
         {c && c.what_to_watch?.length > 0 && (
           <div className="mt-8 border-t border-white/10 pt-6">
-            <h4 className="font-mono text-xs text-haldi">What to watch</h4>
-            {/* React Bits AnimatedList: rows pop in one by one; arrow keys move through them. */}
-            <AnimatedList
-              items={c.what_to_watch.map((w, i) => ({ id: i, title: w, icon: <span className="h-1.5 w-4 rounded-full bg-haldi" /> }))}
-              theme="dark"
-              frame={false}
-              accentColor="#D97706"
-              animation="slide"
-              showGradients={false}
-              displayScrollbar={false}
-              width="100%"
-              maxHeight="none"
-              radius={16}
-              className="al-wrap mt-3 -mx-1.5"
-            />
+            <h4 className="kicker text-haldi">What to watch</h4>
+            <ul className="mt-3 flex flex-col gap-3">
+              {c.what_to_watch.map((w, i) => (
+                <li key={i} className="flex gap-3 text-base leading-snug text-ground/90">
+                  <span aria-hidden="true" className="mt-2 h-1.5 w-4 shrink-0 rounded-full bg-haldi" />
+                  {w}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </section>
       <section aria-label="Risks" className="rounded-[32px] border border-line bg-paper p-7">
         <header className="flex items-center gap-3">
-          <Avatar mono="R" tone={risks.status === "waiting" ? "line" : "ink"} />
+          <AgentAvatar k="risks" state={risks.status} />
           <div className="flex-1">
             <h3 className="font-display text-xl font-semibold">Where each side could be wrong</h3>
             <p className="text-sm text-muted">The Risk analyst</p>
@@ -296,8 +248,8 @@ export function Verdict({ chief, risks }: { chief: AgentState; risks: AgentState
               key={i}
               initial={reduce ? false : { opacity: 0, x: 10 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: i * 0.1, ease: EASE }}
-              className="text-[15px] leading-relaxed text-ink"
+              transition={{ ...SPRING, delay: i * 0.1 }}
+              className="text-base leading-relaxed text-ink"
             >
               {a.point}
               {a.sources.map((s, j) => (
@@ -332,11 +284,11 @@ export function Firewall({ council }: { council: CouncilT }) {
         <ul className="mt-4 flex flex-col gap-3">
           {g.blocked.map((b, i) => (
             <li key={i} className="rounded-2xl bg-paper/80 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-caption">
                 <span className="text-muted">{b.where.replace(/^\./, "").replace(/\./g, " › ").replace(/_/g, " ")}</span>
                 <span className="text-firewall">{b.reason}</span>
               </div>
-              <p className="mt-1.5 text-[15px] text-ink-2 line-through decoration-haldi decoration-2">{b.text}</p>
+              <p className="mt-1.5 text-base text-ink-2 line-through decoration-haldi decoration-2">{b.text}</p>
             </li>
           ))}
         </ul>

@@ -1,32 +1,20 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Nav from "@/components/Nav";
 import { AnalystCard, DebateColumn, Firewall, Verdict } from "@/components/council/Council";
 import ReportDeck from "@/components/council/ReportDeck";
+import Stage from "@/components/council/Stage";
 import Trace from "@/components/council/Trace";
 import CountUp from "@/components/reactbits/CountUp";
-import FoldText from "@/components/reactbits/FoldText";
 import ShinyText from "@/components/reactbits/ShinyText";
-import Stepper, { Step } from "@/components/reactbits/Stepper";
-import { AGENTS, DEMO_STOCKS, progressOf, useCouncil, type AgentKey, type AgentState, type Phase } from "@/lib/council";
+import { AGENTS, DEMO_STOCKS, useCouncil, type AgentKey, type AgentState, type Phase } from "@/lib/council";
 
-// WebGL only exists in the browser; the flat logo stands in while the scene loads.
-const CouncilStage = dynamic(() => import("@/components/three/CouncilStage"), {
-  ssr: false,
-  loading: () => (
-    <div className="grid h-full place-items-center">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/samiksha-symbol.svg" alt="" className="h-40 w-auto opacity-80" />
-    </div>
-  ),
-});
 
-const EASE = [0.16, 1, 0.3, 1] as const;
+const SPRING = { type: "spring", bounce: 0, duration: 0.4 } as const;
 
 const HEADLINE: Record<Phase, string> = {
   connecting: "Convening the council…",
@@ -76,10 +64,9 @@ function Round({ n, title, note, children }: { n: string; title: string; note: s
   return (
     <section className="mt-14 first:mt-0">
       <div className="mb-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="font-mono text-sm text-haldi-text">{n}</span>
-        <h2 className="font-display text-3xl font-semibold tracking-[-0.02em]">
-          {/* React Bits FoldText: the title folds open like the logo's corners */}
-          <FoldText text={title} fontSize="1em" fontWeight="inherit" foldStyle="paper" hinge="top" stagger={0.05} duration={0.7} />
+        <span className="font-mono text-sm text-haldi-text tabular-nums">{n}</span>
+        <h2 className="font-display text-3xl font-semibold tracking-[-0.018em]">
+          {title}
         </h2>
         <span className="text-sm text-muted">{note}</span>
       </div>
@@ -112,7 +99,7 @@ function CouncilPage() {
         <main className="mx-auto max-w-3xl px-4 py-24 text-center">
           <h1 className="font-display text-4xl font-semibold">“{ticker}” isn&apos;t in the demo yet</h1>
           <p className="mt-4 text-ink-2">Try one of: {Object.keys(DEMO_STOCKS).join(", ")}.</p>
-          <Link href="/" className="mt-8 inline-flex min-h-12 items-center rounded-2xl bg-neel px-6 font-medium text-white">Back home</Link>
+          <Link href="/" className="press mt-8 inline-flex min-h-12 items-center rounded-2xl bg-neel px-6 font-medium text-white">Back home</Link>
         </main>
       </div>
     );
@@ -127,7 +114,7 @@ function CouncilPage() {
         <section className="flex flex-wrap items-end justify-between gap-6 pt-8">
           <div>
             <p className="font-mono text-sm text-muted">NSE · {ticker}</p>
-            <h1 className="mt-2 font-display text-[clamp(2.2rem,5.4vw,4.2rem)] leading-[0.98] font-semibold tracking-[-0.04em]">{DEMO_STOCKS[ticker]}</h1>
+            <h1 className="mt-2 font-display text-[clamp(2.2rem,5.4vw,4.2rem)] leading-[0.98] font-semibold tracking-[-0.028em]">{DEMO_STOCKS[ticker]}</h1>
             <div className="mt-4 flex flex-wrap items-center gap-3" aria-live="polite">
               <span className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium ${st.phase === "error" ? "bg-firewall-tint text-firewall" : st.phase === "done" ? "bg-verified-tint text-verified" : "bg-neel-tint text-neel"}`}>
                 <span aria-hidden="true" className={`h-2 w-2 rounded-full ${st.phase === "done" ? "bg-verified" : st.phase === "error" ? "bg-firewall" : "animate-blink bg-neel"}`} />
@@ -141,19 +128,11 @@ function CouncilPage() {
               )}
               {st.phase !== "error" && (
                 <span className="text-sm text-ink-2">
-                  <CountUp to={doneCount} duration={0.6} trigger="load" /> of {AGENTS.length} agents done · <Elapsed t0={st.t0} running={running} />
+                  {st.phase === "done" ? "Research, debate and verdict" : ["Research", "Debate", "Verdict"][stage - 1]} · <CountUp to={doneCount} duration={0.6} trigger="load" /> of {AGENTS.length} agents done · <Elapsed t0={st.t0} running={running} />
                 </span>
               )}
             </div>
           </div>
-          {/* React Bits Stepper as a status rail: Research -> Debate -> Verdict */}
-          {st.phase !== "error" && (
-            <Stepper step={stage} theme="light" accentColor="#4338CA" showFooter={false} disableStepIndicators frame={false} width={460} className="stepper-rail">
-              <Step title="Research"><span /></Step>
-              <Step title="Debate"><span /></Step>
-              <Step title="Verdict"><span /></Step>
-            </Stepper>
-          )}
         </section>
 
         {st.phase === "error" && (
@@ -165,15 +144,15 @@ function CouncilPage() {
           </div>
         )}
 
-        {/* ---------- the stage: the 3D mark (the Chief) with the council seated around it ---------- */}
+        {/* ---------- the stage: the mark (the Chief) with the robot council seated around it ---------- */}
         <section aria-label="The council at work" className="relative mt-8 overflow-hidden rounded-[36px] border border-line bg-gradient-to-b from-paper to-ground">
-          <div className="h-[clamp(440px,68vh,720px)]">
-            <CouncilStage agents={a} counts={counts} progress={progressOf(a)} done={st.phase === "done"} still={reduce} />
+          <div className="h-[clamp(540px,68vh,720px)]">
+            <Stage agents={a} counts={counts} done={st.phase === "done"} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line bg-paper/70 px-5 py-4 sm:px-7">
-            <div className="min-h-12 max-w-2xl text-sm text-ink-2" aria-live="polite">
+            <div className="press min-h-12 max-w-2xl text-sm text-ink-2" aria-live="polite">
               {st.phase === "done" ? (
-                <>The verdict is in. <span className="text-ink">Every page below is built from the findings that flew into the logo.</span></>
+                <>The verdict is in. <span className="text-ink">Every page below is built from the findings that went into the dossier.</span></>
               ) : doing.length ? (
                 doing.map((d) => <div key={d}>{d}…</div>)
               ) : st.phase === "connecting" ? (
@@ -188,18 +167,18 @@ function CouncilPage() {
                 type="button"
                 initial={reduce ? false : { opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, ease: EASE }}
+                transition={SPRING}
                 onClick={() => {
                   setTab("report");
                   reportRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
                 }}
-                className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-neel px-6 font-medium text-white shadow-lg transition-colors hover:bg-neel-deep"
+                className="press inline-flex min-h-12 items-center gap-2 rounded-2xl bg-neel px-6 font-medium text-white shadow-lg hover:bg-neel-deep"
               >
                 Read the report ↓
               </motion.button>
             )}
             {st.phase === "done" && (
-              <Link href={`/s/${ticker}/share`} className="inline-flex min-h-12 items-center rounded-2xl border border-line-2 bg-paper px-5 font-medium text-ink transition-colors hover:border-neel/50">
+              <Link href={`/s/${ticker}/share`} className="press inline-flex min-h-12 items-center rounded-2xl border border-line-2 bg-paper px-5 font-medium text-ink hover:border-neel/50">
                 Share this briefing
               </Link>
             )}
@@ -220,7 +199,7 @@ function CouncilPage() {
                 role="tab"
                 aria-selected={tab === k}
                 onClick={() => setTab(k)}
-                className={`min-h-11 rounded-xl px-5 text-sm font-medium transition-colors ${tab === k ? "bg-ink text-ground" : "text-ink-2 hover:text-ink"}`}
+                className={`press min-h-11 rounded-xl px-5 text-sm font-medium ${tab === k ? "bg-ink text-ground" : "text-ink-2 hover:text-ink"}`}
               >
                 {label}
               </button>
@@ -242,7 +221,7 @@ function CouncilPage() {
               </Round>
               {(a.bull_case.status !== "waiting" || a.bear_case.status !== "waiting") && (
                 <Round n="02" title="Debate" note="Built only from verified findings, then each side answers the other">
-                  <div className="grid gap-10 md:grid-cols-2">
+                  <div className="grid items-start gap-10 md:grid-cols-2">
                     <DebateColumn side="bull" main={a.bull_case} replies={a.bull_rebuttals} />
                     <DebateColumn side="bear" main={a.bear_case} replies={a.bear_rebuttals} />
                   </div>

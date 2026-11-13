@@ -28,6 +28,8 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
   const [below, setBelow] = useState(false); // flip under the pill when there's no room above (sticky header)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pillRef = useRef<HTMLAnchorElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const touch = useRef(false); // on touch there's no hover: the first tap shows the quote, the card holds the link
   const id = useId();
 
   const show = () => {
@@ -42,8 +44,13 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onDown = (e: PointerEvent) => !wrapRef.current?.contains(e.target as Node) && setOpen(false); // tap elsewhere closes
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown);
+    };
   }, [open]);
 
   const pill =
@@ -52,15 +59,22 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
       : "border-neel/30 bg-neel-tint text-neel hover:border-neel";
 
   return (
-    <span className="relative inline-block align-[0.15em]" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
+    <span ref={wrapRef} className="relative inline-block align-[0.15em]" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
       <a
         ref={pillRef}
+        onPointerDown={(e) => (touch.current = e.pointerType !== "mouse")}
+        onClick={(e) => {
+          if (touch.current && !open) {
+            e.preventDefault();
+            show();
+          }
+        }}
         href={item.url || undefined}
         target="_blank"
         rel="noopener noreferrer"
         aria-describedby={open ? id : undefined}
         aria-label={`Source ${n}: ${prettySource(item.source)}`}
-        className={`mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 font-mono text-[11px] leading-none font-medium no-underline transition-colors ${pill}`}
+        className={`relative mx-0.5 inline-flex h-5 min-w-5 items-center before:absolute before:-inset-3 before:content-[''] justify-center rounded-full border px-1.5 tabular-nums text-caption leading-none font-medium no-underline transition-colors ${pill}`}
       >
         {n}
       </a>
@@ -68,7 +82,8 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
         {open && (
           <motion.span
             id={id}
-            role="tooltip"
+            role="dialog"
+            aria-label="Source quote"
             initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.94, y: below ? -6 : 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, scale: 0.96, y: below ? -4 : 4 }}
@@ -76,7 +91,7 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
             style={{ transformOrigin: below ? "top center" : "bottom center", translateX: "-50%" }}
             className={`absolute left-1/2 z-50 ${below ? "top-full mt-2" : "bottom-full mb-2"} block w-[min(320px,80vw)] rounded-2xl border border-line bg-paper p-4 text-left shadow-[0_18px_50px_-12px_rgb(27_24_53/0.35)]`}
           >
-            <span className="flex items-center gap-2 font-mono text-[11px] text-muted">
+            <span className="flex items-center gap-2 text-caption text-muted">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 256 256">
                 <path fill="#1B1835" d="M32 36 H60 V220 H32 Z M224 36 H196 V220 H224 Z" />
                 <path fill="#4338CA" d="M60 36 H92 L76 60 H60 Z M60 196 H76 L92 220 H60 Z M196 36 H164 L180 60 H196 Z M196 196 H180 L164 220 H196 Z" />
@@ -84,12 +99,14 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
               </svg>
               <span className="truncate">{prettySource(item.source)}</span>
             </span>
-            <span className="mt-2 block font-display text-[15px] leading-snug text-ink">
+            <span className="mt-2 block font-display text-base leading-snug text-ink">
               “<span className="highlight">{item.quote}</span>”
             </span>
-            {item.finding && <span className="mt-2 block text-[13px] leading-relaxed text-ink-2">{item.finding}</span>}
+            {item.finding && <span className="mt-2 block text-sm leading-relaxed text-ink-2">{item.finding}</span>}
             {item.url && (
-              <span className="mt-3 block text-[12px] font-medium text-neel">Open the source page ↗</span>
+              <a href={item.url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-neel underline-offset-2 hover:underline">
+                Open the source page ↗
+              </a>
             )}
           </motion.span>
         )}

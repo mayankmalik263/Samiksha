@@ -1,10 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
 import "./globals.css";
 
-// No fixed weights: load the variable font (wght 300-700) so VariableProximity can animate the weight axis.
-const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-space-grotesk" });
-const sans = Inter({ subsets: ["latin"], variable: "--font-inter" });
+// One family. Inter's optical-size axis gives headings the tighter "Display" cut on its own (font-optical-sizing: auto).
+const sans = Inter({ subsets: ["latin"], axes: ["opsz"], variable: "--font-inter" });
 const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-plex-mono" });
 
 export const metadata: Metadata = {
@@ -25,7 +24,7 @@ export const viewport: Viewport = { themeColor: "#FBFAF6" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-svh">{children}</body>
     </html>
   );

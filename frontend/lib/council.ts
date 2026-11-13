@@ -172,13 +172,3 @@ export function useCouncil(ticker: string, rerun = false): CouncilState {
 
   return state;
 }
-
-/** Progress for the 3D mark's three lines. */
-export function progressOf(agents: Record<AgentKey, AgentState>) {
-  const frac = (round: number) => {
-    const xs = AGENTS.filter((a) => a.round === round);
-    const score = xs.reduce((n, a) => n + (agents[a.key].status === "done" || agents[a.key].status === "error" ? 1 : agents[a.key].status === "running" ? 0.15 : 0), 0);
-    return score / xs.length;
-  };
-  return { research: frac(1), debate: frac(2), verdict: frac(3) };
-}

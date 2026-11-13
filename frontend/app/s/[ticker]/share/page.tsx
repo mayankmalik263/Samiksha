@@ -52,9 +52,9 @@ export default function SharePage() {
   const list = (args: Argument[], tone: "neel" | "haldi" | "ink") => (
     <ol className="flex flex-col gap-3">
       {args.map((a, i) => (
-        <li key={i} className="text-[15px] leading-relaxed text-ink">
+        <li key={i} className="text-base leading-relaxed text-ink">
           {a.point}{" "}
-          <sup className={`font-mono text-[10px] ${tone === "neel" ? "text-neel" : tone === "haldi" ? "text-haldi-text" : "text-muted"}`}>
+          <sup className={`text-caption ${tone === "neel" ? "text-neel" : tone === "haldi" ? "text-haldi-text" : "text-muted"}`}>
             [{a.sources.map(numberOf).join(",")}]
           </sup>
           <EvidenceStrength sources={a.sources} />
@@ -71,12 +71,16 @@ export default function SharePage() {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => navigator.clipboard.writeText(location.href).then(() => setCopied(true))}
-            className="min-h-11 rounded-xl border border-line-2 bg-paper px-4 text-sm font-medium text-ink"
+            onClick={() => {
+              // phones: the native share sheet; desktop: copy the link
+              if (navigator.share) navigator.share({ title: `${DEMO_STOCKS[ticker]}: Samiksha briefing`, url: location.href }).catch(() => {});
+              else navigator.clipboard.writeText(location.href).then(() => setCopied(true));
+            }}
+            className="press min-h-11 rounded-xl border border-line-2 bg-paper px-4 text-sm font-medium text-ink"
           >
-            {copied ? "Link copied" : "Copy link"}
+            {copied ? "Link copied" : "Share"}
           </button>
-          <button type="button" onClick={() => window.print()} className="min-h-11 rounded-xl bg-neel px-4 text-sm font-medium text-white">
+          <button type="button" onClick={() => window.print()} className="press min-h-11 rounded-xl bg-neel px-4 text-sm font-medium text-white">
             Save as PDF
           </button>
         </div>
@@ -86,7 +90,7 @@ export default function SharePage() {
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/samiksha-horizontal.svg" alt="Samiksha" className="h-8 w-auto" />
-          <span className="font-mono text-xs text-muted">
+          <span className="text-xs text-muted">
             Research briefing · NSE: {ticker}
             {council?.as_of && ` · ${new Date(council.as_of).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`}
           </span>
@@ -97,10 +101,10 @@ export default function SharePage() {
 
         {b && council && (
           <>
-            <h1 className="mt-8 font-display text-[clamp(2.2rem,5vw,3.4rem)] leading-[1] font-semibold tracking-[-0.035em]">{DEMO_STOCKS[ticker]}</h1>
+            <h1 className="mt-8 font-display text-[clamp(2.2rem,5vw,3.4rem)] leading-[1] font-semibold tracking-[-0.025em]">{DEMO_STOCKS[ticker]}</h1>
             <p className="mt-6 font-display text-[clamp(1.2rem,2.2vw,1.55rem)] leading-snug font-medium text-ink">{b.bottom_line}</p>
 
-            <div className="mt-6 flex flex-wrap gap-2 font-mono text-[11px]">
+            <div className="mt-6 flex flex-wrap gap-2 text-caption">
               <span className="rounded-full bg-verified-tint px-3 py-1 text-verified">{council.guardrail.passed} statements verified against their sources</span>
               <span className="rounded-full bg-firewall-tint px-3 py-1 text-firewall">{council.guardrail.blocked.length} kept out by the firewall</span>
               {ev && <span className="rounded-full bg-neel-tint px-3 py-1 text-neel">{ev.corroborated} of {ev.total} arguments corroborated across documents</span>}
@@ -124,10 +128,10 @@ export default function SharePage() {
 
             {b.what_to_watch.length > 0 && (
               <section className="mt-10 rounded-2xl bg-ink p-6 text-ground print:break-inside-avoid">
-                <h2 className="font-mono text-xs tracking-wide text-haldi uppercase">What to watch</h2>
+                <h2 className="kicker text-haldi">What to watch</h2>
                 <ul className="mt-3 grid gap-2.5 sm:grid-cols-2">
                   {b.what_to_watch.map((w, i) => (
-                    <li key={i} className="flex gap-3 text-[15px] leading-snug">
+                    <li key={i} className="flex gap-3 text-base leading-snug">
                       <span aria-hidden="true" className="mt-2 h-1.5 w-4 shrink-0 rounded-full bg-haldi" />
                       {w}
                     </li>
@@ -137,11 +141,11 @@ export default function SharePage() {
             )}
 
             <section className="mt-10 print:break-inside-avoid">
-              <h2 className="font-mono text-xs tracking-wide text-muted uppercase">Sources</h2>
-              <ol className="mt-3 flex flex-col gap-1.5 text-[12.5px] text-ink-2">
+              <h2 className="kicker text-muted">Sources</h2>
+              <ol className="mt-3 flex flex-col gap-1.5 text-sm text-ink-2">
                 {notes.map((n, i) => (
                   <li key={i} className="flex gap-2">
-                    <span className="w-6 shrink-0 font-mono text-muted">[{i + 1}]</span>
+                    <span className="w-6 shrink-0 text-muted">[{i + 1}]</span>
                     <span>
                       <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium text-neel underline-offset-2 hover:underline">
                         {prettySource(n.source)}
@@ -155,7 +159,7 @@ export default function SharePage() {
 
             <footer className="mt-10 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-5 text-xs text-muted">
               <span><strong className="text-ink">Educational. Not investment advice.</strong> No buy, sell or hold call is made.</span>
-              <span className="font-mono">samiksha · every claim, cited</span>
+              <span className="">samiksha · every claim, cited</span>
             </footer>
           </>
         )}

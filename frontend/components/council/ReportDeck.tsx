@@ -5,12 +5,12 @@
  * edge (the spine) in 3D. Arrow keys, swipe, the buttons or the page tabs move through it. Pages appear as agents
  * finish; while the council is still working, a "being written" page waits at the end. The last page is the verdict.
  */
-import { AnimatePresence, motion, useReducedMotion, type PanInfo } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, type PanInfo } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Citation from "@/components/Citation";
 import EvidenceStrength, { evidenceSummary } from "@/components/Evidence";
 import CountUp from "@/components/reactbits/CountUp";
-import LatticeLoader from "@/components/reactbits/LatticeLoader";
+import { StatusIcon } from "@/components/StatusBadge";
 import type { AgentKey, AgentState, Argument, Chief, Council, EarningsCall, Evidence, Fundamentals, News } from "@/lib/council";
 
 type Section = { heading: string; items: { text: string; cite?: { source: string; url: string; quote: string; finding?: string }[]; flag?: string; answers?: string; strength?: boolean }[] };
@@ -101,29 +101,29 @@ function Sheet({ page, index, total, council }: { page: Page; index: number; tot
       {/* the spine shadow on the left edge */}
       <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-8 rounded-l-md bg-gradient-to-r from-ink/10 to-transparent" />
       <header className="flex items-baseline justify-between gap-4">
-        <span className={`font-mono text-xs tracking-wide uppercase ${t.kicker}`}>{page.kicker}</span>
-        <span className={`font-mono text-xs ${dark ? "text-lilac" : "text-muted"}`}>
-          page {index + 1} of {total}
+        <span className={`kicker uppercase ${t.kicker}`}>{page.kicker}</span>
+        <span className={`text-sm tabular-nums ${dark ? "text-lilac" : "text-muted"}`}>
+          Page {index + 1} of {total}
         </span>
       </header>
-      <h3 className="mt-4 font-display text-[clamp(2rem,4vw,3.2rem)] leading-[1] font-semibold tracking-[-0.03em]">{page.title}</h3>
+      <h3 className="mt-4 font-display text-[clamp(2rem,4vw,3.2rem)] leading-[1] font-semibold tracking-[-0.022em]">{page.title}</h3>
       <p className={`mt-2 text-sm ${dark ? "text-lilac" : "text-muted"}`}>{page.sub}</p>
       <span aria-hidden="true" className={`mt-6 block h-1.5 w-16 rounded-full ${t.rule}`} />
 
       {page.lead && (
-        <p className={`mt-6 font-display leading-snug ${dark ? "text-[clamp(1.35rem,2.4vw,1.9rem)] font-medium" : "text-lg text-ink-2"}`}>{page.lead}</p>
+        <p className={`mt-6 font-display leading-snug ${dark ? "text-[clamp(1.2rem,1.9vw,1.5rem)] leading-[1.45] font-medium" : "text-lg text-ink-2"}`}>{page.lead}</p>
       )}
 
       {page.sections.map((s) => (
         <section key={s.heading} className="mt-7">
-          <h4 className={`font-mono text-xs tracking-wide uppercase ${dark ? "text-lilac" : "text-muted"}`}>{s.heading}</h4>
+          <h4 className={`kicker ${dark ? "text-lilac" : "text-muted"}`}>{s.heading}</h4>
           <ol className="mt-3 flex flex-col gap-3.5">
             {s.items.map((it, i) => (
-              <li key={i} className="flex gap-3 text-[16px] leading-relaxed">
-                <span className={`mt-0.5 w-5 shrink-0 font-mono text-xs ${dark ? "text-lilac" : "text-muted"}`}>{String(i + 1).padStart(2, "0")}</span>
+              <li key={i} className="flex gap-3 text-lg leading-relaxed">
+                <span className={`mt-1.5 w-5 shrink-0 font-mono text-caption tabular-nums ${dark ? "text-lilac" : "text-muted"}`}>{String(i + 1).padStart(2, "0")}</span>
                 <span>
-                  {it.flag && <span className="mr-1.5 rounded bg-firewall-tint px-1.5 py-0.5 font-mono text-[10px] text-firewall uppercase">{it.flag}</span>}
-                  {it.answers && <span className="mr-1.5 font-mono text-[11px] text-muted">re {it.answers}</span>}
+                  {it.flag && <span className="mr-1.5 rounded bg-firewall-tint px-1.5 py-0.5 kicker text-firewall">{it.flag}</span>}
+                  {it.answers && <span className="mr-1.5 text-caption text-muted">re {it.answers}</span>}
                   {it.text}
                   {it.cite?.map((c, j) => <Citation key={j} n={j + 1} item={c} tone={t.pill} />)}
                   {it.strength && it.cite && <EvidenceStrength sources={it.cite} dark={dark} />}
@@ -136,10 +136,10 @@ function Sheet({ page, index, total, council }: { page: Page; index: number; tot
 
       {page.watch && page.watch.length > 0 && (
         <section className="mt-9 border-t border-white/10 pt-6">
-          <h4 className="font-mono text-xs tracking-wide text-haldi uppercase">What to watch</h4>
+          <h4 className="kicker text-haldi">What to watch</h4>
           <ul className="mt-3 grid gap-3 sm:grid-cols-2">
             {page.watch.map((w, i) => (
-              <li key={i} className="flex gap-3 text-[15px] leading-snug text-ground/90">
+              <li key={i} className="flex gap-3 text-base leading-snug text-ground/90">
                 <span aria-hidden="true" className="mt-2 h-1.5 w-4 shrink-0 rounded-full bg-haldi" />
                 {w}
               </li>
@@ -168,18 +168,75 @@ function Writing({ index, total, next }: { index: number; total: number; next: s
   return (
     <article className="relative grid min-h-[560px] place-items-center rounded-r-[22px] rounded-l-md border border-dashed border-line-2 bg-paper/70 p-10 text-center">
       <div>
-        <p className="font-mono text-xs text-muted">page {index + 1} of {total}+</p>
-        <div className="mt-6 flex justify-center text-neel">
-          <LatticeLoader status="working" label={`${next} is writing`} pattern="snake" grid={4} cellSize={7} gap={3} fontSize={16} showTimer={false} />
-        </div>
-        <p className="mx-auto mt-4 max-w-sm text-sm text-muted">This page fills in the moment the agent finishes. Its findings fly into the logo above.</p>
+        <p className="text-sm text-muted tabular-nums">Page {index + 1} of {total}+</p>
+        <p className="mt-6 inline-flex items-center gap-2 text-lg font-medium text-neel">
+          <StatusIcon status="running" className="h-5 w-5" />
+          {next} is writing
+        </p>
+        <p className="mx-auto mt-4 max-w-sm text-sm text-muted">This page fills in the moment the agent finishes. Its findings go into the dossier above.</p>
       </div>
     </article>
   );
 }
 
+// Momentum projection (Apple): where a flick would come to rest, so a quick short swipe still turns the page.
+const project = (v: number, d = 0.998) => ((v / 1000) * d) / (1 - d);
+const SPRING = { type: "spring", bounce: 0, duration: 0.45 } as const;
+
+/**
+ * One sheet that turns under the finger. Dragging left lifts it on its spine 1:1 (rotateY follows the drag); release
+ * decides from the projected rest point, not the release point, and the turn carries on from where the finger left it
+ * (the exit animates the same motion value, so it starts at the on-screen angle and velocity). Dragging right asks for
+ * the previous page with a rubber-band pull.
+ */
+function Turnable({ children, dir, onNext, onPrev, canNext, canPrev, reduce }: {
+  children: React.ReactNode; dir: number; onNext: () => void; onPrev: () => void; canNext: boolean; canPrev: boolean; reduce: boolean;
+}) {
+  const rotateY = useMotionValue(dir < 0 && !reduce ? -105 : 0);
+  const x = useMotionValue(0);
+  const width = useRef(800);
+  const el = useRef<HTMLDivElement>(null);
+  const onPanStart = () => {
+    width.current = el.current?.offsetWidth || 800;
+  };
+  const onPan = (_: PointerEvent, i: PanInfo) => {
+    if (reduce) return;
+    if (i.offset.x < 0 && canNext) rotateY.set(Math.max(-105, (i.offset.x / width.current) * 140));
+    else if (i.offset.x > 0 && canPrev) x.set((i.offset.x * 0.55 * 300) / (300 + 0.55 * i.offset.x)); // rubber band
+  };
+  const onPanEnd = (_: PointerEvent, i: PanInfo) => {
+    const rest = i.offset.x + project(i.velocity.x);
+    animate(x, 0, SPRING);
+    if (rest < -width.current * 0.35 && canNext) return onNext();
+    if (rest > width.current * 0.25 && canPrev) return onPrev();
+    animate(rotateY, 0, SPRING);
+  };
+  return (
+    <motion.div
+      ref={el}
+      initial={reduce ? { opacity: 0 } : false}
+      animate={{ rotateY: 0, opacity: 1, zIndex: 1, transition: reduce ? { duration: 0.2 } : SPRING }}
+      exit={
+        reduce
+          ? { opacity: 0, transition: { duration: 0.15 } }
+          : dir > 0
+            ? { rotateY: -105, zIndex: 2, transition: SPRING }
+            : { opacity: 0, zIndex: 0, transition: { duration: 0.3, delay: 0.25 } }
+      }
+      onPanStart={onPanStart}
+      onPan={onPan}
+      onPanEnd={onPanEnd}
+      className="[grid-area:1/1] cursor-grab touch-pan-y active:cursor-grabbing"
+      style={{ rotateY, x, transformOrigin: "left center", transformStyle: "preserve-3d" }}
+      aria-live="polite"
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export default function ReportDeck({ agents, ticker, running, council }: { agents: Record<AgentKey, AgentState>; ticker: string; running: boolean; council?: Council }) {
-  const reduce = useReducedMotion();
+  const reduce = useReducedMotion() ?? false;
   const pages = useMemo(() => buildPages(agents, ticker), [agents, ticker]);
   const pending = running ? ["fundamentals", "earnings_call", "news", "bull_case", "bear_case", "risks", "chief"].find((k) => agents[k as AgentKey].status !== "done") : undefined;
   const names: Record<string, string> = { fundamentals: "Fundamentals", earnings_call: "Earnings call", news: "News", bull_case: "The Bull", bear_case: "The Bear", risks: "Risk", chief: "The Chief" };
@@ -212,24 +269,8 @@ export default function ReportDeck({ agents, ticker, running, council }: { agent
 
   if (total === 0) return null;
 
-  const turn = {
-    enter: (d: number) => (reduce ? { opacity: 0 } : d > 0 ? { rotateY: 0, opacity: 1, zIndex: 0 } : { rotateY: -105, opacity: 1, zIndex: 2 }),
-    center: { rotateY: 0, opacity: 1, zIndex: 1, transition: { duration: reduce ? 0.2 : 0.75, ease: [0.16, 1, 0.3, 1] as const } },
-    exit: (d: number) =>
-      reduce
-        ? { opacity: 0, transition: { duration: 0.15 } }
-        : d > 0
-          ? { rotateY: -105, opacity: 1, zIndex: 2, transition: { duration: 0.75, ease: [0.65, 0, 0.35, 1] as const } }
-          : { opacity: 0, zIndex: 0, transition: { duration: 0.4, delay: 0.3 } },
-  };
-
-  const onDragEnd = (_: unknown, info: PanInfo) => {
-    if (info.offset.x < -80) go(at + 1);
-    else if (info.offset.x > 80) go(at - 1);
-  };
-
   return (
-    <section ref={box} aria-label="The report, page by page" aria-roledescription="carousel">
+    <section ref={box} aria-label="The report, page by page" aria-roledescription="carousel" className="mx-auto max-w-3xl">
       {/* page tabs */}
       <nav className="mb-5 flex flex-wrap gap-2" aria-label="Pages">
         {pages.map((p, k) => (
@@ -238,14 +279,15 @@ export default function ReportDeck({ agents, ticker, running, council }: { agent
             type="button"
             onClick={() => go(k)}
             aria-current={k === at ? "page" : undefined}
-            className={`min-h-10 rounded-full border px-4 text-sm transition-colors ${k === at ? "border-ink bg-ink text-ground" : "border-line-2 bg-paper text-ink-2 hover:border-neel/50 hover:text-ink"}`}
+            className={`press min-h-11 rounded-full border px-4 text-sm ${k === at ? "border-ink bg-ink text-ground" : "border-line-2 bg-paper text-ink-2 hover:border-neel/50 hover:text-ink"}`}
           >
             {p.title}
           </button>
         ))}
         {pending && (
-          <button type="button" onClick={() => go(pages.length)} className="min-h-10 rounded-full border border-dashed border-line-2 px-4 text-sm text-muted">
-            {names[pending]} is writing…
+          <button type="button" onClick={() => go(pages.length)} className="press inline-flex min-h-11 items-center gap-2 rounded-full border border-dashed border-line-2 px-4 text-sm text-muted">
+            <StatusIcon status="running" className="h-3.5 w-3.5" />
+            {names[pending]} is writing
           </button>
         )}
       </nav>
@@ -255,28 +297,22 @@ export default function ReportDeck({ agents, ticker, running, council }: { agent
         <span aria-hidden="true" className="absolute inset-0 translate-x-3 translate-y-3 rounded-r-[22px] rounded-l-md bg-line/70" />
         <span aria-hidden="true" className="absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-r-[22px] rounded-l-md bg-line-2/60" />
         <div className="relative grid">
-          <AnimatePresence initial={false} custom={dir}>
-            <motion.div
+          <AnimatePresence initial={false}>
+            <Turnable
               key={at < pages.length ? pages[at].key : "writing"}
-              custom={dir}
-              variants={turn}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              drag={reduce ? false : "x"}
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={0.12}
-              onDragEnd={onDragEnd}
-              className="[grid-area:1/1] cursor-grab active:cursor-grabbing"
-              style={{ transformOrigin: "left center", transformStyle: "preserve-3d" }}
-              aria-live="polite"
+              dir={dir}
+              reduce={reduce}
+              canNext={at < total - 1}
+              canPrev={at > 0}
+              onNext={() => go(at + 1)}
+              onPrev={() => go(at - 1)}
             >
               {at < pages.length ? (
                 <Sheet page={pages[at]} index={at} total={total} council={council} />
               ) : (
                 <Writing index={at} total={total} next={names[pending ?? "chief"]} />
               )}
-            </motion.div>
+            </Turnable>
           </AnimatePresence>
         </div>
       </div>
@@ -287,18 +323,20 @@ export default function ReportDeck({ agents, ticker, running, council }: { agent
           type="button"
           onClick={() => go(at - 1)}
           disabled={at === 0}
-          className="inline-flex min-h-12 items-center gap-2 rounded-2xl border border-line-2 bg-paper px-5 font-medium text-ink transition-colors hover:border-neel/50 disabled:opacity-40"
+          title="Previous page (←)"
+          className="press inline-flex min-h-12 items-center gap-2 rounded-2xl border border-line-2 bg-paper px-5 font-medium text-ink hover:border-neel/50 disabled:opacity-40"
         >
           ← Previous
         </button>
-        <span className="font-mono text-sm text-muted">
-          {at + 1} / {total} <span className="hidden sm:inline">· use ← → or swipe</span>
+        <span className="text-sm text-muted tabular-nums">
+          {at + 1} of {total}
         </span>
         <button
           type="button"
           onClick={() => go(at + 1)}
           disabled={at >= total - 1}
-          className={`relative inline-flex min-h-12 items-center gap-2 rounded-2xl bg-neel px-5 font-medium text-white transition-colors hover:bg-neel-deep disabled:opacity-40 ${fresh ? "ring-4 ring-haldi/40" : ""}`}
+          title="Next page (→), or swipe the page"
+          className={`press relative inline-flex min-h-12 items-center gap-2 rounded-2xl bg-neel px-5 font-medium text-white hover:bg-neel-deep disabled:opacity-40 ${fresh ? "ring-4 ring-haldi/40" : ""}`}
         >
           {fresh ? "New page →" : "Next page →"}
         </button>

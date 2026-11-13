@@ -7,7 +7,8 @@
  */
 import { useEffect, useState } from "react";
 import { AGENTS, type AgentKey, type AgentState, type Phase } from "@/lib/council";
-import StatusMark from "@/components/reactbits/StatusMark";
+import { StatusIcon } from "@/components/StatusBadge";
+import { AgentAvatar } from "@/components/council/Robot";
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -31,7 +32,7 @@ export default function Trace({ agents, t0, phase, replay = false }: { agents: R
     <section aria-label="Run trace" className="rounded-[28px] border border-line bg-paper">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <span className={`h-2 w-2 rounded-full ${active ? "animate-blink bg-neel" : "bg-verified"}`} aria-hidden="true" />
-        <h2 className="font-mono text-sm text-ink">run trace</h2>
+        <h2 className="text-sm text-ink">run trace</h2>
         <span className="text-xs text-muted">{replay ? "paced replay of today's cached run (not model timings)" : "live timings from the model"}</span>
         <span className="ml-auto font-mono text-xs tabular-nums text-ink-2">{fmt(total)}</span>
       </header>
@@ -46,16 +47,9 @@ export default function Trace({ agents, t0, phase, replay = false }: { agents: R
             s.status === "error" ? "bg-firewall" : a.key.startsWith("bull") ? "bg-neel" : a.key.startsWith("bear") ? "bg-haldi" : a.key === "chief" ? "bg-ink" : "bg-ink-2/70";
           return (
             <li key={a.key} className="flex h-8 items-center gap-3">
-              <span className={`flex w-32 shrink-0 items-center gap-2 font-mono text-xs sm:w-36 ${s.status === "waiting" ? "text-muted" : "text-ink"}`}>
-                {/* React Bits StatusMark: dashed ring -> spinning arc -> check (or cross), morphing in place */}
-                <StatusMark
-                  status={{ waiting: "pending", running: "running", done: "done", error: "failed" }[s.status]}
-                  size={14}
-                  strokeWidth={2.4}
-                  color={s.status === "waiting" ? "#5A5670" : "#4338CA"}
-                  doneColor="#15803D"
-                  errorColor="#92400E"
-                />
+              <span className={`flex w-40 shrink-0 items-center gap-2 text-sm sm:w-48 ${s.status === "waiting" ? "text-muted" : "text-ink"}`}>
+                <AgentAvatar k={a.key} state={s.status} size="h-6 w-6" />
+                <StatusIcon status={s.status} className="h-3.5 w-3.5" />
                 <span className="truncate">{a.name}</span>
               </span>
               <span className="relative h-2 flex-1 rounded-full bg-line/60">
@@ -66,7 +60,7 @@ export default function Trace({ agents, t0, phase, replay = false }: { agents: R
                   />
                 )}
               </span>
-              <span className="w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted">
+              <span className="w-14 shrink-0 text-right font-mono text-caption tabular-nums text-muted">
                 {s.status === "done" && end !== null && start !== null ? fmt(end - start) : s.status === "running" ? "…" : s.status === "error" ? "failed" : ""}
               </span>
             </li>
