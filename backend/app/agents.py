@@ -336,6 +336,30 @@ def _round(pool, jobs: dict, emit: Emit, errors: dict, t0: float) -> dict:
     return results
 
 
+def _verdict_check(findings: list[Finding]):
+    """chat_json hook for the Chief: advice language, or a number no verified finding contains, earns one rewrite."""
+    source = _findings_text(findings)
+
+    def check(v: BaseModel) -> str | None:
+        if problem := _advice_check(v):
+            return problem
+        if bad := guardrail.unsupported_numbers(v.bottom_line, source):
+            return f"number(s) {', '.join(sorted(bad))} in the bottom line are not in any finding; use only numbers from the findings"
+        return None
+    return check
+
+
+def _supported_sentences(text: str, findings: list[Finding]) -> tuple[str, list[dict]]:
+    """Last line of defence for the bottom line: drop any sentence that still carries an unsupported number."""
+    source, kept, cut = _findings_text(findings), [], []
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        if sentence and (bad := guardrail.unsupported_numbers(sentence, source)):
+            cut.append({"where": ".briefing.bottom_line", "text": sentence, "reason": f"number(s) {', '.join(sorted(bad))} not in the cited findings"})
+        elif sentence:
+            kept.append(sentence)
+    return " ".join(kept), cut
+
+
 def debate(company: str, findings: list[Finding], emit: Emit = _noop) -> dict:
     """Round 1: Bull and Bear in parallel. Round 2 (all parallel): both rebuttals, the Risk agent, the Chief synthesizer.
     Two LLM rounds after the analysts instead of four: speed is the constraint on BharatCode."""
@@ -355,11 +379,13 @@ def debate(company: str, findings: list[Finding], emit: Emit = _noop) -> dict:
             "bull_rebuttals": (_rebut, "Bull", base, bear, findings) if bear else None,  # bull answering the bear
             "bear_rebuttals": (_rebut, "Bear", base, bull, findings) if bull else None,  # bear answering the bull
             "risks": (_debater, RISK_SYSTEM, base + sides, findings),
-            "chief": (chat_json, SYNTH_SYSTEM, base + sides, Verdict, SYNTH_EXAMPLE, 1, False, _advice_check),
+            "chief": (chat_json, SYNTH_SYSTEM, base + sides, Verdict, SYNTH_EXAMPLE, 1, False, _verdict_check(findings)),
         }, emit, errors, t0)
     verdict = r2.get("chief")
+    bottom_line, cut = _supported_sentences(verdict.bottom_line if verdict else "", findings)
     out = {
-        "bottom_line": verdict.bottom_line if verdict else "",
+        "bottom_line": bottom_line,
+        "_blocked": cut,  # sentences the firewall removed; guardrail.firewall moves them into its log
         "bull_case": bull,
         "bear_case": bear,
         "bull_rebuttals": r2.get("bull_rebuttals", []),

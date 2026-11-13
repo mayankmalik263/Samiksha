@@ -62,9 +62,23 @@ def screener_links(ticker: str) -> dict:
     }
 
 
+# The rupee glyph in many Indian annual-report fonts extracts as a capital H ("H84,329 crore", "H 31/- per share").
+# Only an H directly before an amount AND a unit is a rupee: "H2 FY26" / "H1" (half-years) stay as they are.
+_RUPEE = re.compile(r"\bH ?(?=\d[\d,]*(?:\.\d+)?\s*(?:crore|cr\b|lakh|/-|million|billion|per share))", re.I)
+
+
+def clean_pdf_text(text: str) -> str:
+    """Fix the rupee glyph, re-join hyphenated words, and turn hard line breaks into spaces so sentences flow:
+    the model quotes whole sentences instead of fragments cut at PDF line ends."""
+    text = _RUPEE.sub("₹", text)
+    text = re.sub(r"(\w)-\n(?=[a-z])", r"\1", text)
+    return re.sub(r"\s*\n\s*", " ", text)
+
+
 def pdf_docs(url: str, name: str) -> list[dict]:
     with fitz.open(fetch(url, ".pdf")) as pdf:
-        return [{"source": f"{name} p.{i + 1}", "url": f"{url}#page={i + 1}", "text": p.get_text()} for i, p in enumerate(pdf)]
+        return [{"source": f"{name} p.{i + 1}", "url": f"{url}#page={i + 1}", "text": clean_pdf_text(p.get_text())}
+                for i, p in enumerate(pdf)]
 
 
 def financial_docs(ticker: str) -> list[dict]:

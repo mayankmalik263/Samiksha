@@ -89,6 +89,9 @@ def _clean(node, path: str, blocked: list):
     if isinstance(node, dict):
         out = {}
         for k, v in node.items():
+            if k == "_blocked":  # items an agent already removed (e.g. bottom-line sentences with invented numbers)
+                blocked.extend(v)
+                continue
             if k in ("bottom_line", "answer") and isinstance(v, str) and (m := advice(v)):
                 blocked.append({"where": f"{path}.{k}", "text": v, "reason": f"advice language: '{m}'"})
                 out[k] = WITHHELD

@@ -176,4 +176,20 @@ r = c.post("/ask", json={"ticker": "TCS", "question": "Should I buy?"}).json()
 assert r["evidence"] == [] and "third-party buy/sell call" in r["guardrail"]["blocked"][0]["reason"], r
 
 assert c.post("/analyze", json={"ticker": "PUMPDUMP"}).status_code == 404
+
+# The Chief's bottom line: a sentence with a number no finding contains is cut, and the firewall logs it.
+from app import agents  # noqa: E402
+
+fs = [agents.Finding(claim="Debt is Rs 9,000 crore", quote="Rs 9,000 crore", ref="E1", verified=True)]
+kept, cut = agents._supported_sentences("Debt is Rs 9,000 crore. It rose 20% in a year. Watch margins.", fs)
+assert kept == "Debt is Rs 9,000 crore. Watch margins." and "20" in cut[0]["reason"], (kept, cut)
+fw = guardrail.firewall({"briefing": {"bottom_line": kept, "_blocked": cut}})
+assert "_blocked" not in fw["briefing"] and fw["guardrail"]["blocked"][0]["where"] == ".briefing.bottom_line"
+assert agents._verdict_check(fs)(agents.Verdict(bottom_line="Debt is 12% higher.", what_to_watch=[]))
+
+# PDF text: the rupee glyph extracts as "H"; half-years ("H2 FY26") must survive; line breaks flow into sentences.
+for raw, want in {"dividend of H 31/- per share": "dividend of ₹31/- per share", "(H612 crore)": "(₹612 crore)",
+                  "drag in H2 FY26": "drag in H2 FY26", "manage-\nment expects": "management expects",
+                  "operating\nmargin of 25.0%": "operating margin of 25.0%"}.items():
+    assert rag.clean_pdf_text(raw) == want, (raw, rag.clean_pdf_text(raw))
 print("spine ok")
