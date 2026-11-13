@@ -1,11 +1,12 @@
-"""Offline check of the spine: fake Qwen + fake retrieval -> parsed, grounded API JSON. Run: python test_spine.py"""
+"""Offline check of the whole pipeline: fake Qwen + fake retrieval -> grounded, firewalled API JSON.
+Run: python test_spine.py   (and: python -m app.guardrail)"""
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from app import llm, rag
+from app import guardrail, llm, rag
 from app.main import app
 
 rag.DATA = Path(tempfile.mkdtemp())  # never touch the real data/ (briefings get cached there)
@@ -14,62 +15,144 @@ rag.load = lambda t: None
 rag.search = lambda t, q, k=6, only=None: HITS
 rag.docs = lambda t, only: [{"source": "news 2026-11-01", "url": "n1", "text": "2026-11-01: TCS wins big deal - ET"}]
 
-# Agents run in parallel threads, so fake replies are queued per agent (picked by its system prompt).
-AGENTS = ("Fundamentals", "Earnings-call", "News analyst", "Chief synthesizer", "answer questions")
-replies: dict[str, list[str]] = {}
+replies: dict[str, list[str]] = {}  # agents run in parallel threads, so fake replies are queued per agent
 calls = []
 
 
-def fake_create(**kw):
-    agent = next(a for a in AGENTS if a in kw["messages"][0]["content"])
-    calls.append(agent)
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=replies[agent].pop(0)))])
+def who(system: str) -> str:
+    if "rebutting" in system:
+        return "Bull rebuttal" if "Bull analyst" in system else "Bear rebuttal"
+    return next(a for a in ("Fundamentals", "Earnings-call", "News analyst", "Bull analyst", "Bear analyst",
+                            "Risk analyst", "Chief synthesizer", "answer questions") if a in system)
 
+
+def chunks(text: str):  # what a streamed completion yields
+    return [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text[i:i + 7]))]) for i in range(0, len(text), 7)]
+
+
+def fake_create(**kw):
+    assert kw["stream"] is True
+    agent = who(kw["messages"][0]["content"])
+    calls.append(agent)
+    return chunks(replies[agent].pop(0))
+
+
+# Stall handling: a stream that goes silent mid-way is retried, not fatal.
+attempts = []
+
+
+def stalling_create(**kw):
+    attempts.append(1)
+    if len(attempts) == 1:
+        def gen():
+            yield from chunks('{"half": ')
+            raise llm.http.ReadTimeout("no tokens for 180s")
+        return gen()
+    return chunks('{"ok": true}')
+
+
+llm.client.chat.completions.create = stalling_create
+llm.time.sleep = lambda s: None
+assert llm.complete([], {}) == '{"ok": true}' and len(attempts) == 2
+
+# "Model unavailable" arrives mid-stream as a plain APIError (seen live) -> retried; a 401 is not.
+import httpx2  # noqa: E402  (same HTTP library the SDK uses)
+from openai import APIError, AuthenticationError  # noqa: E402
+
+_req = httpx2.Request("POST", "https://x")
+assert llm._retryable(APIError("Model unavailable.", _req, body=None))
+assert not llm._retryable(AuthenticationError("bad key", response=httpx2.Response(401, request=_req), body=None))
 
 llm.client.chat.completions.create = fake_create
 c = TestClient(app)
 
-FUND_OK = ('{"company":"TCS","points":[{"claim":"Debt is Rs 9,000 crore","quote":"total debt rs 9,000 crore","ref":"[E1]"}],'
-           '"red_flags":[{"claim":"made up","quote":"Debt is zero","ref":"E1"},{"claim":"bad ref","quote":"Rs 9,000 crore","ref":"E7"}]}')
-EARN_OK = '{"company":"TCS","guidance":[],"highlights":[],"concerns":[],"tone":{"claim":"calm","quote":"Rs 9,000 crore","ref":"E1"}}'
-NEWS_OK = '{"company":"TCS","events":[{"claim":"Won a deal","quote":"TCS wins big deal","ref":"E1"}],"overall":"positive"}'
-SYNTH_OK = ('{"bottom_line":"Balanced.","bull_case":[{"point":"Low debt","refs":["F1"]},{"point":"ghost","refs":["F99"]}],'
-            '"bear_case":[{"point":"Calm tone","refs":["[F2]","F3"]}],"risks":[],"what_to_watch":["Next quarter"]}')
+FUND = ('{"company":"TCS","points":[{"claim":"Debt is Rs 9,000 crore","quote":"total debt rs 9,000 crore","ref":"[E1]"}],'
+        '"red_flags":[{"claim":"made up","quote":"Debt is zero","ref":"E1"},'
+        '{"claim":"bad ref","quote":"Rs 9,000 crore","ref":"E7"},'
+        '{"claim":"Debt is Rs 9,500 crore","quote":"Rs 9,000 crore","ref":"E1"}]}')
+EARN = '{"company":"TCS","guidance":[],"highlights":[],"concerns":[],"tone":{"claim":"calm","quote":"Rs 9,000 crore","ref":"E1"}}'
+EARN_ADVICE = EARN.replace('"highlights":[]', '"highlights":[{"claim":"Investors should buy the stock","quote":"Rs 9,000 crore","ref":"E1"}]')
+NEWS = '{"company":"TCS","events":[{"claim":"Won a deal","quote":"TCS wins big deal","ref":"E1"}],"overall":"positive"}'
+BULL = ('{"arguments":[{"point":"Debt is only Rs 9,000 crore","refs":["F1"]},{"point":"ghost","refs":["F99"]},'
+        '{"point":"Debt is Rs 1,234 crore","refs":["F1"]}]}')
+BEAR = '{"arguments":[{"point":"Tone was calm","refs":["[F2]","F3"]}]}'
+BULL_REB = '{"arguments":[{"answers":"A1","point":"Calm is fine","refs":["F2"]}]}'
+BEAR_REB_ADVICE = '{"arguments":[{"answers":"A1","point":"TCS is a strong buy","refs":["F1"]}]}'
+RISK = '{"arguments":[{"point":"Debt could rise","refs":["F1"]}]}'
+SYNTH_ADVICE = '{"bottom_line":"Investors should buy the stock now.","what_to_watch":["Next quarter","Buy on dips"]}'
+SYNTH = '{"bottom_line":"Balanced view.","what_to_watch":["Next quarter"]}'
 
-# 1) Retry + schema-echo parsing; one analyst fails -> others + briefing still return; nothing cached.
+# 1) Parsing retries, advice rewrites, invented numbers, firewall, one analyst failing -> nothing cached.
 replies.update({
-    "Fundamentals": ["not json", '<think>hmm</think>{"$defs": {}, "type": "object"}\n```json\n' + FUND_OK + "\n```"],
-    "Earnings-call": [EARN_OK],
-    "News analyst": ["nope", "still nope"],
-    "Chief synthesizer": [SYNTH_OK],
+    "Fundamentals": ["not json", '<think>hmm</think>{"$defs": {}, "type": "object"}\n```json\n' + FUND + "\n```"],
+    "Earnings-call": [EARN_ADVICE, EARN],             # advice -> one rewrite -> clean
+    "News analyst": ["nope", "still nope"],           # fails twice -> this analyst errors, the rest carry on
+    "Bull analyst": [BULL], "Bear analyst": [BEAR], "Bull rebuttal": [BULL_REB],
+    "Bear rebuttal": [BEAR_REB_ADVICE, BEAR_REB_ADVICE],  # still advisory after rewrite -> firewall drops it
+    "Risk analyst": [RISK], "Chief synthesizer": [SYNTH_ADVICE, SYNTH_ADVICE],
 })
 r = c.post("/analyze", json={"ticker": " tcs "})
 assert r.status_code == 200, r.text
-council = r.json()["council"]
-f = council["fundamentals"]
-assert calls.count("Fundamentals") == 2
-assert f["points"][0]["verified"] and f["points"][0]["source"] == "ar p.5" and f["points"][0]["url"] == "u#page=5"
-assert not f["red_flags"][0]["verified"]                              # quote not in the excerpt
-assert not f["red_flags"][1]["verified"] and f["red_flags"][1]["source"] == ""  # E7 doesn't exist
-assert council["earnings_call"]["tone"]["verified"]                    # single (non-list) findings verified too
-assert "error" in council["news"]
-b = council["briefing"]  # synthesizer saw only verified findings: F1 = debt point, F2 = tone
-assert [p["point"] for p in b["bull_case"]] == ["Low debt"]           # point citing only F99 dropped
+out = r.json()["council"]
+assert calls.count("Fundamentals") == 2 and calls.count("Earnings-call") == 2
+f = out["fundamentals"]
+assert [p["claim"] for p in f["points"]] == ["Debt is Rs 9,000 crore"] and f["points"][0]["url"] == "u#page=5"
+assert f["red_flags"] == []  # all three failed verification and were removed
+reasons = " | ".join(b["reason"] for b in out["guardrail"]["blocked"])
+for expected in ("quote not found", "doesn't exist (E7)", "9500 not in the cited source", "cites no verified finding",
+                 "1234 not in the cited findings", "advice language"):
+    assert expected in reasons, (expected, reasons)
+assert out["earnings_call"]["tone"]["verified"] and out["earnings_call"]["highlights"] == []
+assert "error" in out["news"]
+b = out["briefing"]  # findings seen by the debate: F1 = debt point, F2 = tone
+assert [a["point"] for a in b["bull_case"]] == ["Debt is only Rs 9,000 crore"]
 assert b["bull_case"][0]["sources"][0]["url"] == "u#page=5"
-assert len(b["bear_case"][0]["sources"]) == 1                          # F2 resolves, F3 out of range ignored
-assert not list(rag.DATA.glob("*/briefing-*.json"))                    # incomplete briefing not cached
+assert len(b["bear_case"][0]["sources"]) == 1     # F2 resolves, F3 out of range ignored
+assert b["bull_rebuttals"][0]["answers"] == "A1" and b["bear_rebuttals"] == []
+assert b["risks"][0]["verified"]
+assert b["bottom_line"] == guardrail.WITHHELD and b["what_to_watch"] == ["Next quarter"]
+assert not list(rag.DATA.glob("*/briefing-*.json"))  # incomplete briefing not cached
 
-# 2) Complete run is cached; the next request is served without any LLM call.
-replies.update({"Fundamentals": [FUND_OK], "Earnings-call": [EARN_OK], "News analyst": [NEWS_OK], "Chief synthesizer": [SYNTH_OK]})
-assert "error" not in c.post("/analyze", json={"ticker": "TCS"}).json()["council"]["news"]
+# 2) A complete run is cached; the next request is served without any LLM call.
+replies.update({"Fundamentals": [FUND], "Earnings-call": [EARN], "News analyst": [NEWS], "Bull analyst": [BULL],
+                "Bear analyst": [BEAR], "Bull rebuttal": [BULL_REB], "Bear rebuttal": [BULL_REB],
+                "Risk analyst": [RISK], "Chief synthesizer": [SYNTH]})
+first = c.post("/analyze", json={"ticker": "TCS"}).json()["council"]
+assert first["briefing"]["bottom_line"] == "Balanced view."
 n = len(calls)
-assert c.post("/analyze", json={"ticker": "TCS"}).json()["council"]["news"]["overall"] == "positive"
+assert c.post("/analyze", json={"ticker": "TCS"}).json()["council"] == first
 assert len(calls) == n  # cache hit
 
-# /ask: same grounding check.
-replies["answer questions"] = ['{"answer":"x","evidence":[{"quote":"total debt rs 9,000 crore","ref":"E1"},{"quote":"Debt is zero","ref":"E1"}]}']
+# 3) One debater failing (seen live: BharatCode 503) -> the rest of the debate still returns, flagged, not cached.
+def flaky_create(**kw):
+    if who(kw["messages"][0]["content"]) == "Bear analyst":
+        raise RuntimeError("503 Model unavailable")
+    return fake_create(**kw)
+
+
+llm.client.chat.completions.create = flaky_create
+replies.update({"Fundamentals": [FUND], "Earnings-call": [EARN], "News analyst": [NEWS], "Bull analyst": [BULL],
+                "Bear rebuttal": [BULL_REB], "Risk analyst": [RISK], "Chief synthesizer": [SYNTH]})
+for cached in rag.DATA.glob("*/briefing-*.json"):
+    cached.unlink()
+b = c.post("/analyze", json={"ticker": "TCS", "fresh": True}).json()["council"]["briefing"]
+assert b["bull_case"] and b["bear_case"] == [] and b["bull_rebuttals"] == [] and b["bear_rebuttals"]
+assert "503" in b["errors"]["bear_case"] and b["bottom_line"] == "Balanced view."
+assert not list(rag.DATA.glob("*/briefing-*.json"))
+llm.client.chat.completions.create = fake_create
+
+# /ask: advice rewrite + grounding + firewall.
+replies["answer questions"] = ['{"answer":"It is a strong buy","evidence":[]}',
+                               '{"answer":"Debt is Rs 9,000 crore","evidence":[{"quote":"total debt rs 9,000 crore","ref":"E1"},{"quote":"Debt is zero","ref":"E1"}]}']
 r = c.post("/ask", json={"ticker": "TCS", "question": "debt?"}).json()
-assert [e["verified"] for e in r["evidence"]] == [True, False], r
+assert r["answer"] == "Debt is Rs 9,000 crore" and len(r["evidence"]) == 1 and r["evidence"][0]["verified"], r
+assert len(r["guardrail"]["blocked"]) == 1
+
+# A broker's call quoted as "evidence" is never verified (seen live: "Buy TCS; target of Rs 2530: Geojit").
+rag.search = lambda t, q, k=6, only=None: [{"source": "news 2026-10-15", "url": "n", "text": "Buy Tata Consultancy Services; target of Rs 2530: Geojit"}]
+replies["answer questions"] = ['{"answer":"No recommendation is given.","evidence":[{"quote":"Buy Tata Consultancy Services; target of Rs 2530","ref":"E1"}]}']
+r = c.post("/ask", json={"ticker": "TCS", "question": "Should I buy?"}).json()
+assert r["evidence"] == [] and "third-party buy/sell call" in r["guardrail"]["blocked"][0]["reason"], r
 
 assert c.post("/analyze", json={"ticker": "PUMPDUMP"}).status_code == 404
 print("spine ok")

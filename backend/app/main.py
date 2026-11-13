@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import agents
+from . import agents, guardrail
 
 # Demo universe (NSE). Only these are accepted until ingestion is generic.
 DEMO_STOCKS = {
@@ -48,7 +48,8 @@ class AskRequest(BaseModel):
 @app.post("/ask")
 def ask(req: AskRequest):
     ticker = _ticker(req.ticker)
-    return {"ticker": ticker, **_run(agents.ask, ticker, req.question[:500]).model_dump(), "disclaimer": DISCLAIMER}
+    answer = guardrail.firewall(_run(agents.ask, ticker, req.question[:500]).model_dump())
+    return {"ticker": ticker, **answer, "disclaimer": DISCLAIMER}
 
 
 class AnalyzeRequest(BaseModel):

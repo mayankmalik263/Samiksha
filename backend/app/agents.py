@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 from fastapi.encoders import jsonable_encoder
 from pydantic import AfterValidator, BaseModel
 
-from . import rag
+from . import guardrail, rag
 from .llm import chat_json
 
 # Model sometimes echoes the "[E3]" format; keep the bare id.
@@ -26,7 +26,8 @@ class Evidence(BaseModel):
     ref: Ref     # excerpt id the model cites, e.g. "E3"
     source: str = ""        # filled in by us from the ref
     url: str = ""
-    verified: bool = False  # set by us, not the model: does the quote really appear in that excerpt?
+    verified: bool = False  # set by us, not the model: quote in the excerpt AND every claimed number in it
+    issue: str = ""         # why it failed verification (shown in the guardrail log)
 
 
 class Finding(Evidence):
@@ -42,13 +43,31 @@ def _norm(s: str) -> str:
 
 
 def _verify(items: list[Evidence], hits: list[dict]) -> None:
-    """Grounding check: resolve E<n> to its excerpt; verified only if the quote literally appears in it."""
+    """Grounding check: resolve E<n> to its excerpt; verified only if the quote literally appears in it
+    and (for findings) every number in the claim appears in that excerpt too."""
     for ev in items:
         m = re.fullmatch(r"E(\d+)", ev.ref)
-        if m and 1 <= int(m.group(1)) <= len(hits):
-            h = hits[int(m.group(1)) - 1]
-            ev.source, ev.url = h["source"], h["url"]
-            ev.verified = _norm(ev.quote) in _norm(h["text"])
+        if not (m and 1 <= int(m.group(1)) <= len(hits)):
+            ev.issue = f"cites an excerpt that doesn't exist ({ev.ref})"
+            continue
+        h = hits[int(m.group(1)) - 1]
+        ev.source, ev.url = h["source"], h["url"]
+        if _norm(ev.quote) not in _norm(h["text"]):
+            ev.issue = "quote not found in the cited source"
+        elif m := guardrail.advice(ev.quote):  # seen live: a broker's "Buy ...; target of Rs 2530" headline as evidence
+            ev.issue = f"relays a third-party buy/sell call or target ('{m}')"
+        elif bad := guardrail.unsupported_numbers(getattr(ev, "claim", ""), h["text"]):
+            ev.issue = f"number(s) {', '.join(sorted(bad))} not in the cited source"
+        else:
+            ev.verified = True
+
+
+def _advice_check(obj: BaseModel) -> str | None:
+    """chat_json hook: any recommendation language in model-written text triggers one rewrite."""
+    for text in guardrail.written_texts(obj.model_dump()):
+        if m := guardrail.advice(text):
+            return f"'{m}' in: {text[:160]}"
+    return None
 
 
 QUOTE_RULE = """Each excerpt starts with its id like [E3]. For every fact give "ref" (the excerpt id) and "quote":
@@ -81,7 +100,7 @@ ASK_EXAMPLE = """{"answer": "Total debt was Rs 8,000 crore at the end of FY2026,
 
 def ask(ticker: str, question: str) -> Answer:
     hits = rag.search(ticker, question)
-    ans = chat_json(ASK_SYSTEM, f"Question: {question}\n\nExcerpts:\n{_context(hits)}", Answer, ASK_EXAMPLE)
+    ans = chat_json(ASK_SYSTEM, f"Question: {question}\n\nExcerpts:\n{_context(hits)}", Answer, ASK_EXAMPLE, check=_advice_check)
     _verify(ans.evidence, hits)
     return ans
 
@@ -103,7 +122,7 @@ def _analyst(company: str, hits: list[dict], system: str, schema: type[BaseModel
     """One Qwen call over the numbered excerpts, then verify every quote in the output."""
     if not hits:
         raise ValueError("no source documents of this type were ingested")
-    out = chat_json(system, f"Company: {company}\n\nExcerpts:\n{_context(hits)}", schema, example)
+    out = chat_json(system, f"Company: {company}\n\nExcerpts:\n{_context(hits)}", schema, example, check=_advice_check)
     _verify(_evidence_in(out), hits)
     return out
 
@@ -199,46 +218,133 @@ def news(ticker: str, company: str) -> News:
     return _analyst(company, rag.docs(ticker, "news"), NEWS_SYSTEM, News, NEWS_EXAMPLE)
 
 
-# ---------- Chief synthesizer: the final balanced verdict (never a buy/sell call) ----------
+# ---------- The debate: Bull vs Bear, rebuttals, Risk, Chief synthesizer ----------
+# Debaters never see raw documents: they argue only from verified findings (F1, F2...), and every
+# argument's numbers must exist in the findings it cites. Inform, never advise.
 
-class Point(BaseModel):
+class Argument(BaseModel):
     point: str
-    refs: list[Ref]          # finding ids, e.g. ["F3", "F7"]
-    sources: list[dict] = []  # filled in by us from the referenced verified findings
+    refs: list[Ref]           # finding ids, e.g. ["F3", "F7"]
+    answers: Ref = ""         # rebuttals only: the opposing argument this answers, e.g. "A2"
+    sources: list[dict] = []  # filled in by us from the referenced findings
+    verified: bool = False    # set by us: cites real findings and invents no numbers
+    issue: str = ""
 
 
-class Briefing(BaseModel):
-    bottom_line: str           # balanced 2-3 sentence summary weighing both sides
-    bull_case: list[Point]
-    bear_case: list[Point]
-    risks: list[Point]
+class Case(BaseModel):
+    arguments: list[Argument]
+
+
+class Verdict(BaseModel):
+    bottom_line: str           # balanced 2-3 sentence summary weighing both sides; never a recommendation
     what_to_watch: list[str]
 
 
-SYNTH_SYSTEM = """You are the Chief synthesizer on Samiksha, an educational research desk. You get numbered, verified findings
-from three analysts (fundamentals, earnings call, news). Write a balanced briefing using ONLY those findings.
-"bottom_line" = 2-3 plain-English sentences weighing the strongest positives against the strongest concerns.
-"bull_case", "bear_case", "risks" = 2-4 points each; every point cites 1-3 finding ids in "refs" (e.g. ["F2","F9"]).
-"what_to_watch" = 2-4 short things an investor should monitor next.
+DEBATE_RULES = """You argue ONLY from the numbered verified findings given. Every argument cites 1-3 finding ids in "refs" (e.g. ["F2","F9"]).
+Use numbers exactly as they appear in the findings; never add new numbers. One or two short sentences per argument.
+You argue about the BUSINESS (growth, profits, balance sheet, management, news), never about whether to buy the stock.
+Never recommend buying, selling or holding; no rating, no target price, no "undervalued/overvalued"."""
+
+BULL_SYSTEM = f"""You are the Bull analyst on Samiksha. Make the strongest HONEST case that the business is in good shape:
+3-4 arguments, strongest first. Don't exaggerate or ignore what the findings say.
+{DEBATE_RULES}"""
+
+BEAR_SYSTEM = f"""You are the Bear analyst on Samiksha. Make the strongest HONEST case that the business has real problems:
+3-4 arguments, strongest first. Don't exaggerate or ignore what the findings say.
+{DEBATE_RULES}"""
+
+REBUTTAL_SYSTEM = """You are the {side} analyst on Samiksha, rebutting the opposing analyst. Their arguments are numbered A1, A2...
+Answer their 2 strongest arguments: set "answers" to the argument id you are answering and counter it with evidence.
+{rules}"""
+
+RISK_SYSTEM = f"""You are the Risk analyst on Samiksha. Stress-test both sides of the debate: what could break the bull case,
+and what could make the bear case worse (or prove it wrong)? 3-4 risks, most important first, as "arguments".
+{DEBATE_RULES}"""
+
+SYNTH_SYSTEM = """You are the Chief synthesizer on Samiksha, an educational research desk. You get verified findings and the bull and bear arguments.
+"bottom_line" = 2-3 plain-English sentences that weigh the strongest bull point against the strongest bear point, for a first-time investor.
+"what_to_watch" = 2-4 short, concrete things to monitor next (results, guidance, events).
 Never tell the reader to buy, sell or hold; no rating, no target price, no "good/bad investment" verdict. Inform, don't advise."""
 
-SYNTH_EXAMPLE = """{"bottom_line": "Example Ltd is growing profitably with low debt, but its home market shrank and management sounded cautious about the next two quarters.", "bull_case": [{"point": "Margins are at a multi-year high.", "refs": ["F2"]}], "bear_case": [{"point": "Home-market revenue fell sharply.", "refs": ["F8", "F12"]}], "risks": [{"point": "Growth depends on a demand recovery management has not promised.", "refs": ["F10"]}], "what_to_watch": ["Whether the next quarter's deal wins hold up"]}"""
+CASE_EXAMPLE = """{"arguments": [{"point": "Margins are at a four-year high of 25.0% while debt stays small.", "refs": ["F2", "F6"]}]}"""
+REBUTTAL_EXAMPLE = """{"arguments": [{"answers": "A1", "point": "The revenue dip came from one large contract ending, not lost clients.", "refs": ["F1", "F3"]}]}"""
+SYNTH_EXAMPLE = """{"bottom_line": "Example Ltd is growing profitably with little debt, but its home market shrank and management sounded cautious about the next two quarters.", "what_to_watch": ["Whether next quarter's deal wins hold up", "Any change in margin guidance"]}"""
 
 
-def synthesize(company: str, findings: list[Finding]) -> Briefing:
+def _findings_text(findings: list[Finding]) -> str:
+    return "\n".join(f"[F{i}] {f.claim} ({f.source})" for i, f in enumerate(findings, 1))
+
+
+def _args_text(args: list[Argument]) -> str:
+    return "\n".join(f"[A{i}] {a.point}" for i, a in enumerate(args, 1))
+
+
+def _resolve(args: list[Argument], findings: list[Finding]) -> list[Argument]:
+    """Attach the cited findings as sources; verified only if refs are real and no number is invented."""
+    for a in args:
+        ids = [int(m.group(1)) for r in a.refs if (m := re.fullmatch(r"F(\d+)", r)) and 1 <= int(m.group(1)) <= len(findings)]
+        cited = [findings[i - 1] for i in dict.fromkeys(ids)]
+        a.sources = [{"source": f.source, "url": f.url, "quote": f.quote, "finding": f.claim} for f in cited]
+        support = " ".join(f"{f.claim} {f.quote}" for f in cited)
+        if not cited:
+            a.issue = "cites no verified finding"
+        elif bad := guardrail.unsupported_numbers(a.point, support):
+            a.issue = f"number(s) {', '.join(sorted(bad))} not in the cited findings"
+        else:
+            a.verified = True
+    return args
+
+
+def _debater(system: str, user: str, findings: list[Finding], example: str = CASE_EXAMPLE) -> list[Argument]:
+    case = chat_json(system, user, Case, example, check=_advice_check)
+    return _resolve(case.arguments, findings)
+
+
+def _rebut(side: str, base: str, opponent: list[Argument], findings: list[Finding]) -> list[Argument]:
+    system = REBUTTAL_SYSTEM.format(side=side, rules=DEBATE_RULES)
+    return _debater(system, f"{base}\n\nOpposing arguments:\n{_args_text(opponent)}", findings, REBUTTAL_EXAMPLE)
+
+
+def debate(company: str, findings: list[Finding]) -> dict:
+    """Round 1: Bull and Bear in parallel. Round 2 (all parallel): both rebuttals, the Risk agent, the Chief synthesizer.
+    Two LLM rounds after the analysts instead of four: speed is the constraint on BharatCode."""
     if not findings:
-        raise ValueError("no verified findings to synthesize")
-    body = "\n".join(f"[F{i}] {f.claim} ({f.source})" for i, f in enumerate(findings, 1))
-    out = chat_json(SYNTH_SYSTEM, f"Company: {company}\n\nVerified findings:\n{body}", Briefing, SYNTH_EXAMPLE)
-    for section in (out.bull_case, out.bear_case, out.risks):
-        for p in section:
-            ids = [int(m.group(1)) for r in p.refs if (m := re.fullmatch(r"F(\d+)", r)) and 1 <= int(m.group(1)) <= len(findings)]
-            p.sources = [{"source": findings[i - 1].source, "url": findings[i - 1].url, "quote": findings[i - 1].quote} for i in ids]
-        section[:] = [p for p in section if p.sources]  # citation-or-reject: a point with no valid finding behind it is dropped
+        raise ValueError("no verified findings to debate")
+    base = f"Company: {company}\n\nVerified findings:\n{_findings_text(findings)}"
+    errors: dict[str, str] = {}
+
+    def get(name, fut, default):  # each debater fails on its own (seen live: a 503 from BharatCode)
+        try:
+            return fut.result() if fut else default
+        except Exception as e:
+            errors[name] = f"{type(e).__name__}: {e}"
+            return default
+
+    with ThreadPoolExecutor(4) as pool:
+        bull = get("bull_case", pool.submit(_debater, BULL_SYSTEM, base, findings), [])
+        bear = get("bear_case", pool.submit(_debater, BEAR_SYSTEM, base, findings), [])
+        if not bull and not bear:
+            raise ValueError(f"both debaters failed: {errors}")
+        sides = f"\n\nBull arguments:\n{_args_text(bull)}\n\nBear arguments:\n{_args_text(bear)}"
+        bull_reb = pool.submit(_rebut, "Bull", base, bear, findings) if bear else None
+        bear_reb = pool.submit(_rebut, "Bear", base, bull, findings) if bull else None
+        risk = pool.submit(_debater, RISK_SYSTEM, base + sides, findings)
+        verdict = get("bottom_line", pool.submit(chat_json, SYNTH_SYSTEM, base + sides, Verdict, SYNTH_EXAMPLE, check=_advice_check), None)
+        out = {
+            "bottom_line": verdict.bottom_line if verdict else "",
+            "bull_case": bull,
+            "bear_case": bear,
+            "bull_rebuttals": get("bull_rebuttals", bull_reb, []),  # bull answering the bear's arguments
+            "bear_rebuttals": get("bear_rebuttals", bear_reb, []),  # bear answering the bull's arguments
+            "risks": get("risks", risk, []),
+            "what_to_watch": verdict.what_to_watch if verdict else [],
+        }
+    if errors:
+        out["errors"] = errors  # partial briefing: shown, but not cached
     return out
 
 
-# ---------- The council: analysts in parallel -> synthesizer, cached per day ----------
+# ---------- The pipeline: analysts (parallel) -> debate -> guardrail firewall, cached per day ----------
 
 ANALYSTS = {"fundamentals": fundamentals, "earnings_call": earnings_call, "news": news}
 
@@ -258,11 +364,13 @@ def council(ticker: str, company: str, fresh: bool = False) -> dict:
         except Exception as e:  # one analyst failing shouldn't sink the whole briefing
             out[name] = {"error": f"{type(e).__name__}: {e}"}
     try:
-        out["briefing"] = synthesize(company, findings)
+        out["briefing"] = debate(company, findings)
     except Exception as e:
         out["briefing"] = {"error": f"{type(e).__name__}: {e}"}
-    out = jsonable_encoder(out)
-    if not any("error" in v for v in out.values()):  # only cache complete briefings
+    out = guardrail.firewall(jsonable_encoder(out))  # nothing unverified or advisory leaves the server
+    if not any(isinstance(v, dict) and ("error" in v or "errors" in v) for v in out.values()):  # only cache complete briefings
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(out, ensure_ascii=False), "utf-8")
     return out
+
+
