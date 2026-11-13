@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* Samiksha brand tokens: Neel & Haldi (see brand/README.md). */
+@theme {
+  --color-ink: #1b1835;
+  --color-ink-2: #3d3955;
+  --color-muted: #5a5670; /* 6.7:1 on ground */
+  --color-ground: #fbfaf6;
+  --color-paper: #ffffff;
+  --color-line: #e7e4da;
+  --color-line-2: #d6d2c6;
+  --color-neel: #4338ca;
+  --color-neel-deep: #2f2690;
+  --color-neel-tint: #ecebfb;
+  --color-lilac: #c7c3f4;
+  --color-haldi: #d97706; /* shapes only: 3.2:1 on white */
+  --color-haldi-text: #b45309; /* haldi as text: 4.8:1 on ground */
+  --color-haldi-tint: #fdf1dd;
+  --color-verified: #15803d;
+  --color-verified-tint: #e3f3e8;
+  --color-firewall: #92400e;
+  --color-firewall-tint: #fef3c7;
+
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-marquee: marquee 38s linear infinite;
+  --animate-blink: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes marquee {
+  to { transform: translateX(-50%); }
+}
+@keyframes blink {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+html {
+  background: var(--color-ground);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-ground);
+}
+::selection { background: var(--color-haldi-tint); color: var(--color-ink); }
+:focus-visible { outline: 3px solid var(--color-neel); outline-offset: 2px; border-radius: 6px; }
+
+/* Paper grain + faint ruled lines: the "source document" backdrop. Pure CSS, no image request. */
+.paper {
+  background-color: var(--color-ground);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(27 24 53 / 0.05) 1px, transparent 0),
+    linear-gradient(to bottom, transparent 0, transparent 31px, rgb(27 24 53 / 0.035) 32px);
+  background-size: 22px 22px, 100% 32px;
+}
+
+/* The haldi highlighter: the logo's quote line, used on text. */
+.highlight {
+  background: linear-gradient(transparent 58%, rgb(217 119 6 / 0.32) 58%, rgb(217 119 6 / 0.32) 92%, transparent 92%);
+  padding: 0 0.08em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
