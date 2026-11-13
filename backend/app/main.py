@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import agents, guardrail
+from . import agents, guardrail, llm, rag
 
 # Demo universe (NSE). Only these are accepted until ingestion is generic.
 DEMO_STOCKS = {
@@ -43,6 +43,14 @@ def _run(fn, *args):
 @app.get("/stocks")
 def stocks():
     return DEMO_STOCKS
+
+
+@app.get("/health")
+def health():
+    """For the deploy check and the demo: which stocks are ready, and how fresh each briefing is."""
+    ready = {t: (rag.DATA / t / "vectors.npy").exists() for t in DEMO_STOCKS}
+    latest = {t: (f.stem.removeprefix("briefing-") if (f := agents.latest_briefing(t)) else None) for t in DEMO_STOCKS}
+    return {"ok": True, "model": llm.MODEL, "key_set": llm.API_KEY.startswith("bc_"), "ingested": ready, "latest_briefing": latest}
 
 
 class AskRequest(BaseModel):

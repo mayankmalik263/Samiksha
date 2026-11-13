@@ -148,6 +148,20 @@ FUNDAMENTALS_TOPICS = [
     "related party transactions",
 ]
 
+# Banks report differently: no "operating margin" or free cash flow; asset quality, deposits and capital matter.
+# ponytail: a hard-coded set for the demo universe; switch to a sector lookup when tickers become open-ended.
+BANKS = {"HDFCBANK"}
+BANK_TOPICS = [
+    "Net Interest Income and net interest margin NIM",
+    "Gross NPA and Net NPA ratio asset quality",
+    "Deposits growth and CASA ratio",
+    "Advances loan book growth",
+    "Capital adequacy ratio CRAR and Tier 1 capital",
+    "Net Income profit after tax",
+    "promoter shareholding and shares pledged or encumbered",
+    "Independent Auditor's Report Opinion: in our opinion the financial statements give a true and fair view",
+]
+
 FUNDAMENTALS_SYSTEM = f"""You are the Fundamentals analyst on Samiksha, an educational stock research desk for Indian retail investors.
 Cover: revenue and growth, margins, profit, debt, cash flow, promoter holding/pledging, audit opinion, related-party deals.
 "points" = at most 7 key facts, one per topic. "red_flags" = at most 3 genuine concerns visible in the excerpts (can be empty; never manufacture one).
@@ -158,7 +172,14 @@ Keep each claim to one short sentence.
 FUNDAMENTALS_EXAMPLE = """{"company": "Example Ltd", "points": [{"claim": "Revenue grew to Rs 5,600 crore in FY2026 from Rs 5,000 crore.", "quote": "FY2026: Rs 5,600 crore, FY2025: Rs 5,000 crore", "ref": "E1"}], "red_flags": [{"claim": "Promoters have pledged 10% of their shares.", "quote": "pledged or otherwise encumbered 10.0%", "ref": "E7"}], "not_found": ["related-party transactions"]}"""
 
 
+BANK_NOTE = """
+This company is a bank: instead of operating margin and free cash flow, cover net interest income and margin, asset
+quality (gross/net NPA), deposits and CASA, loan growth, capital adequacy, profit, shareholding and the audit opinion."""
+
+
 def fundamentals(ticker: str, company: str) -> Fundamentals:
+    if ticker in BANKS:  # banks only: other companies must not list "CASA ratio" as missing
+        return _analyst(company, _gather(ticker, BANK_TOPICS), FUNDAMENTALS_SYSTEM + BANK_NOTE, Fundamentals, FUNDAMENTALS_EXAMPLE)
     return _analyst(company, _gather(ticker, FUNDAMENTALS_TOPICS), FUNDAMENTALS_SYSTEM, Fundamentals, FUNDAMENTALS_EXAMPLE)
 
 
@@ -171,6 +192,7 @@ class EarningsCall(BaseModel):
     concerns: list[Finding]    # weak spots management admitted or analysts pressed on
     tone: Finding | None = None  # overall management tone, backed by a quote
     not_found: list[str] = []
+    unavailable: str = ""  # set (instead of failing) when no transcript is public, e.g. ITC posts none on BSE
 
 
 EARNINGS_TOPICS = [
@@ -194,7 +216,11 @@ EARNINGS_EXAMPLE = """{"company": "Example Ltd", "guidance": [{"claim": "Managem
 
 
 def earnings_call(ticker: str, company: str) -> EarningsCall:
-    return _analyst(company, _gather(ticker, EARNINGS_TOPICS, only="concall"), EARNINGS_SYSTEM, EarningsCall, EARNINGS_EXAMPLE)
+    hits = _gather(ticker, EARNINGS_TOPICS, only="concall")
+    if not hits:  # an honest gap, not a failure: the briefing still completes (and caches) without this source
+        return EarningsCall(company=company, guidance=[], highlights=[], concerns=[],
+                            unavailable="No earnings-call transcript is publicly available for this company.")
+    return _analyst(company, hits, EARNINGS_SYSTEM, EarningsCall, EARNINGS_EXAMPLE)
 
 
 # ---------- News agent ----------
@@ -403,11 +429,19 @@ def debate(company: str, findings: list[Finding], emit: Emit = _noop) -> dict:
 ANALYSTS = {"fundamentals": fundamentals, "earnings_call": earnings_call, "news": news}
 
 
+def latest_briefing(ticker: str):
+    """The newest cached briefing file for a stock (names sort by date), or None."""
+    files = sorted((rag.DATA / ticker).glob("briefing-*.json"))
+    return files[-1] if files else None
+
+
 def council(ticker: str, company: str, fresh: bool = False, emit: Emit = _noop) -> dict:
     cache = rag.DATA / ticker / f"briefing-{date.today()}.json"
-    if cache.exists() and not fresh:
-        out = json.loads(cache.read_text("utf-8"))
-        emit({"type": "cached"})  # the UI replays a cached briefing at its own pace
+    latest = latest_briefing(ticker)
+    if latest and not fresh:  # today's, or else the most recent one: a demo never waits on the model
+        out = json.loads(latest.read_text("utf-8"))
+        out["as_of"] = latest.stem.removeprefix("briefing-")
+        emit({"type": "cached", "as_of": out["as_of"]})  # the UI replays it at its own pace and shows the date
         return out
     rag.load(ticker)  # fail fast (409) if the stock isn't ingested, before spending LLM calls
     emit({"type": "start"})
@@ -426,6 +460,7 @@ def council(ticker: str, company: str, fresh: bool = False, emit: Emit = _noop) 
     except Exception as e:
         out["briefing"] = {"error": f"{type(e).__name__}: {e}"}
     out = guardrail.firewall(jsonable_encoder(out))  # nothing unverified or advisory leaves the server
+    out["as_of"] = str(date.today())
     if not any(isinstance(v, dict) and ("error" in v or "errors" in v) for v in out.values()):  # only cache complete briefings
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(out, ensure_ascii=False), "utf-8")

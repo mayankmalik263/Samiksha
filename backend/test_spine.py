@@ -187,6 +187,22 @@ fw = guardrail.firewall({"briefing": {"bottom_line": kept, "_blocked": cut}})
 assert "_blocked" not in fw["briefing"] and fw["guardrail"]["blocked"][0]["where"] == ".briefing.bottom_line"
 assert agents._verdict_check(fs)(agents.Verdict(bottom_line="Debt is 12% higher.", what_to_watch=[]))
 
+# No briefing today -> the most recent one is served with its date, without any model call (demo-day safety).
+old = rag.DATA / "INFY" / "briefing-2026-11-01.json"
+old.parent.mkdir(parents=True, exist_ok=True)
+old.write_text('{"briefing": {"bottom_line": "older"}, "guardrail": {"passed": 0, "blocked": []}}', "utf-8")
+n = len(calls)
+ev = sse(c.get("/analyze/stream", params={"ticker": "INFY"}))
+assert ev[1] == {"type": "cached", "as_of": "2026-11-01"} and ev[-1]["council"]["as_of"] == "2026-11-01" and len(calls) == n
+h = c.get("/health").json()
+assert h["ok"] and h["latest_briefing"]["INFY"] == "2026-11-01" and h["latest_briefing"]["ITC"] is None
+
+# No public transcript (ITC) -> an honest "unavailable", not a failure that would stop the briefing caching.
+_search = rag.search
+rag.search = lambda t, q, k=6, only=None: [] if only == "concall" else HITS
+assert agents.earnings_call("ITC", "ITC").unavailable
+rag.search = _search
+
 # PDF text: the rupee glyph extracts as "H"; half-years ("H2 FY26") must survive; line breaks flow into sentences.
 for raw, want in {"dividend of H 31/- per share": "dividend of ₹31/- per share", "(H612 crore)": "(₹612 crore)",
                   "drag in H2 FY26": "drag in H2 FY26", "manage-\nment expects": "management expects",

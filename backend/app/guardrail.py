@@ -49,8 +49,18 @@ def numbers(text: str) -> set[str]:
     return out
 
 
+# Filings write years as "2025-26", "FY26" or "FY 2025-26"; the model normalises them to "FY2026". Same year, not a
+# new number: count those forms as the year they end in.
+_YEAR_SPAN = re.compile(r"\b(20\d\d)\s*[-–/]\s*(\d\d)\b")
+_FY_SHORT = re.compile(r"\bFY\s*'?(\d\d)\b", re.I)
+
+
+def _years(text: str) -> set[str]:
+    return {"20" + m.group(2) for m in _YEAR_SPAN.finditer(text)} | {"20" + m.group(1) for m in _FY_SHORT.finditer(text)}
+
+
 def unsupported_numbers(claim: str, source_text: str) -> set[str]:
-    return numbers(claim) - numbers(source_text)
+    return numbers(claim) - numbers(source_text) - _years(source_text)
 
 
 # Model-written fields. Quotes are checked separately at verification (agents._verify): a quote relaying a
@@ -130,6 +140,9 @@ if __name__ == "__main__":  # quick self-check: python -m app.guardrail
     assert unsupported_numbers("Revenue rose 4.6% to Rs 2,67,021 crore", "growth of 4.6% ... Rs 267,021 crore") == set()
     assert unsupported_numbers("cash flow was 105.9% of profit", "Operating Cash Flow FY2026: Rs 52,094 crore") == {"105.9"}
     assert unsupported_numbers("a 4-year high of 25%", "operating margin of 25.0%, a four-year high") == set()
+    assert unsupported_numbers("NII grew 4.9% in FY2026", "net interest income for 2025-26 rose 4.9%") == set()
+    assert unsupported_numbers("ready by 2027 or 2028", "demerger expected by FY28, perhaps 2027") == set()
+    assert unsupported_numbers("debt rose 8.4x in FY2026", "FY2026: Rs 2,399 crore, FY2025: Rs 285 crore") == {"8.4"}
     r = firewall({"x": {"points": [{"claim": "ok 25%", "verified": True}, {"claim": "made up", "verified": False, "issue": "quote not found"},
                                    {"claim": "You should buy the stock", "verified": True}],
                         "bottom_line": "TCS is a strong buy", "what_to_watch": ["Next quarter deals", "Buy on dips"]}})
