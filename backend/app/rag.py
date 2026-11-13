@@ -2,11 +2,13 @@
 
 CLI:  python -m app.rag ingest TCS
       python -m app.rag ask TCS "what's the debt?"
+      python -m app.rag analyze TCS [fresh]  (analyst council + final briefing; cached per day unless "fresh")
 """
 import hashlib
 import json
 import re
 import sys
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -130,18 +132,33 @@ def ingest(ticker: str, company: str) -> int:
 # ---------- search ----------
 
 _index: dict = {}
+_lock = threading.Lock()  # council agents search in parallel; load the model/index once
 
 
-def search(ticker: str, query: str, k: int = 6) -> list[dict]:
-    if ticker not in _index:
-        d = DATA / ticker
-        if not (d / "vectors.npy").exists():
-            raise FileNotFoundError(f"{ticker} not ingested. Run: python -m app.rag ingest {ticker}")
-        _index[ticker] = (np.load(d / "vectors.npy"), json.loads((d / "chunks.json").read_text("utf-8"))["chunks"])
-    vecs, chunks = _index[ticker]
+def load(ticker: str) -> tuple[np.ndarray, list[dict]]:
+    with _lock:
+        if ticker not in _index:
+            d = DATA / ticker
+            if not (d / "vectors.npy").exists():
+                raise FileNotFoundError(f"{ticker} not ingested. Run: python -m app.rag ingest {ticker}")
+            _index[ticker] = (np.load(d / "vectors.npy"), json.loads((d / "chunks.json").read_text("utf-8"))["chunks"])
+        embed([])  # make sure the model is loaded under the lock too
+    return _index[ticker]
+
+
+def search(ticker: str, query: str, k: int = 6, only: str | None = None) -> list[dict]:
+    """only: restrict to chunks whose source starts with this prefix, e.g. "concall" or "news"."""
+    vecs, chunks = load(ticker)
     # ponytail: brute-force cosine over a numpy array; fine for ~1k chunks/stock, move to Cloudflare Vectorize when multi-stock
     scores = vecs @ embed(["Represent this sentence for searching relevant passages: " + query])[0]
-    return [{**chunks[i], "score": float(scores[i])} for i in np.argsort(-scores)[:k]]
+    if only:
+        scores = np.where([c["source"].startswith(only) for c in chunks], scores, -np.inf)
+    return [{**chunks[i], "score": float(scores[i])} for i in np.argsort(-scores)[:k] if scores[i] > -np.inf]
+
+
+def docs(ticker: str, only: str) -> list[dict]:
+    """Every chunk from one source type (the news set is small enough to read whole)."""
+    return [c for c in load(ticker)[1] if c["source"].startswith(only)]
 
 
 if __name__ == "__main__":
@@ -154,3 +171,7 @@ if __name__ == "__main__":
         from .agents import ask
 
         print(ask(ticker, " ".join(sys.argv[3:])).model_dump_json(indent=2))
+    elif cmd == "analyze":
+        from .agents import council
+
+        print(json.dumps(council(ticker, DEMO_STOCKS[ticker], fresh="fresh" in sys.argv), indent=2, ensure_ascii=False))

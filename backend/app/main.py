@@ -53,9 +53,10 @@ def ask(req: AskRequest):
 
 class AnalyzeRequest(BaseModel):
     ticker: str
+    fresh: bool = False  # skip today's cached briefing and re-run the council
 
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
     ticker = _ticker(req.ticker)
-    return {"ticker": ticker, "fundamentals": _run(agents.fundamentals, ticker, DEMO_STOCKS[ticker]), "disclaimer": DISCLAIMER}
+    return {"ticker": ticker, "council": _run(agents.council, ticker, DEMO_STOCKS[ticker], req.fresh), "disclaimer": DISCLAIMER}

@@ -17,6 +17,8 @@ if not API_KEY.startswith("bc_"):
 client = OpenAI(
     api_key=API_KEY or "missing",
     base_url=os.getenv("LLM_BASE_URL", "https://bharatcode.ai/api/model/v1"),
+    timeout=float(os.getenv("LLM_TIMEOUT", "300")),  # BharatCode can drop to ~3 tok/s; cap a stuck call so one agent can't hang the council
+    max_retries=1,  # one retry for network blips (seen: DNS failure)
 )
 MODEL = os.getenv("LLM_MODEL", "qwen-3.8-27b")
 
