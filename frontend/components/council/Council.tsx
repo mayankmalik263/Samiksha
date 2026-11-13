@@ -121,7 +121,13 @@ export function AnalystCard({ k, name, role, mono, s }: { k: AgentKey; name: str
             ))}
           </ul>
         )}
-        {s.status === "done" && items.length === 0 && <p className="text-sm text-muted">Nothing verifiable in the sources for this round.</p>}
+        {s.status === "done" && items.length === 0 && (
+          <p className="text-sm text-muted">
+            {k === "earnings_call" && (s.data as EarningsCall | undefined)?.unavailable
+              ? `${(s.data as EarningsCall).unavailable} The rest of the council works from the annual report, financials and news.`
+              : "Nothing verifiable in the sources for this round."}
+          </p>
+        )}
         {s.status === "running" && (
           <div className="flex flex-col gap-2.5" aria-hidden="true">
             {[88, 72, 80].map((w, i) => (

@@ -19,7 +19,7 @@ export type Evidence = { claim?: string; quote: string; ref: string; source: str
 export type Source = { source: string; url: string; quote: string; finding: string };
 export type Argument = { point: string; refs: string[]; answers: string; sources: Source[]; verified: boolean };
 export type Fundamentals = { company: string; points: Evidence[]; red_flags: Evidence[]; not_found?: string[] };
-export type EarningsCall = { company: string; guidance: Evidence[]; highlights: Evidence[]; concerns: Evidence[]; tone: Evidence | null };
+export type EarningsCall = { company: string; guidance: Evidence[]; highlights: Evidence[]; concerns: Evidence[]; tone: Evidence | null; unavailable?: string };
 export type News = { company: string; events: Evidence[]; overall: "positive" | "negative" | "mixed" | "neutral" | "quiet" };
 export type Chief = { bottom_line: string; what_to_watch: string[] };
 export type Blocked = { where: string; text: string; reason: string };
@@ -40,6 +40,7 @@ export type Council = {
       }
     | { error: string };
   guardrail: { passed: number; blocked: Blocked[] };
+  as_of?: string; // YYYY-MM-DD the briefing was written
 };
 
 /* ---------- the agents, in the order the council runs them ---------- */
@@ -70,6 +71,7 @@ export type CouncilState = {
   error?: string;
   t0: number; // ms timestamp the run (or replay) started, for the trace
   replay?: boolean; // the timings are a paced replay of a cached run, not real model timings
+  asOf?: string; // date the briefing was written (a cached one may be from an earlier day)
 };
 
 const fresh = (): Record<AgentKey, AgentState> =>
@@ -104,6 +106,8 @@ export function useCouncil(ticker: string, rerun = false): CouncilState {
     const url = `${API}/analyze/stream?ticker=${encodeURIComponent(ticker)}${rerun ? "&fresh=true" : ""}`;
     const es = new EventSource(url);
     let replay = false;
+    let asOf: string | undefined;
+    let gotAgent = false;
     let finished = false;
 
     const patch = (key: AgentKey, s: Partial<AgentState>) =>
@@ -112,8 +116,12 @@ export function useCouncil(ticker: string, rerun = false): CouncilState {
     es.onmessage = (msg) => {
       const e = JSON.parse(msg.data);
       if (e.type === "start") setState((p) => ({ ...p, phase: "live", t0: Date.now() }));
-      else if (e.type === "cached") replay = true;
+      else if (e.type === "cached") {
+        replay = true;
+        asOf = e.as_of;
+      }
       else if (e.type === "agent") {
+        gotAgent = true;
         const now = Date.now();
         if (e.status === "running") patch(e.agent, { status: "running", start: now });
         else if (e.status === "done") patch(e.agent, { status: "done", end: now, data: e.data });
@@ -123,11 +131,11 @@ export function useCouncil(ticker: string, rerun = false): CouncilState {
         es.close();
         const council: Council = e.council;
         if (!replay) {
-          setState((p) => ({ ...p, phase: "done", council }));
+          setState((p) => ({ ...p, phase: "done", council, asOf: council.as_of }));
           return;
         }
         const t0 = Date.now();
-        setState({ phase: "replay", agents: fresh(), t0, replay: true });
+        setState({ phase: "replay", agents: fresh(), t0, replay: true, asOf });
         for (const a of AGENTS) {
           const [s, f] = REPLAY[a.key];
           timers.current.push(setTimeout(() => patch(a.key, { status: "running", start: t0 + s, simulated: true }), s));
@@ -137,13 +145,23 @@ export function useCouncil(ticker: string, rerun = false): CouncilState {
       } else if (e.type === "error") {
         finished = true;
         es.close();
-        setState((p) => ({ ...p, phase: "error", error: e.detail }));
+        const detail =
+          e.status === 409
+            ? "This stock's documents haven't been ingested yet, so the council has nothing to read. Try another demo stock."
+            : `The model didn't answer this time (${e.detail}). BharatCode is sometimes busy: try again in a minute.`;
+        setState((p) => ({ ...p, phase: "error", error: detail }));
       }
     };
     es.onerror = () => {
       if (finished) return;
       es.close();
-      setState((p) => ({ ...p, phase: "error", error: `Can't reach the Samiksha backend at ${API}. Is it running? (uvicorn app.main:app)` }));
+      setState((p) => ({
+        ...p,
+        phase: "error",
+        error: gotAgent
+          ? "The live connection dropped mid-run. The council keeps working on the server and saves its briefing: reload in a minute to see it."
+          : `Can't reach the Samiksha backend at ${API}. Is it running? (uvicorn app.main:app)`,
+      }));
     };
     return () => {
       es.close();

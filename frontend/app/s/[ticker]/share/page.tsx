@@ -13,7 +13,6 @@ import { API, DEMO_STOCKS, type Argument, type Council } from "@/lib/council";
 
 type Brief = Extract<Council["briefing"], { bottom_line: string }>;
 
-const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 
 export default function SharePage() {
   const { ticker: raw } = useParams<{ ticker: string }>();
@@ -87,7 +86,10 @@ export default function SharePage() {
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/samiksha-horizontal.svg" alt="Samiksha" className="h-8 w-auto" />
-          <span className="font-mono text-xs text-muted">Research briefing · NSE: {ticker} · {today}</span>
+          <span className="font-mono text-xs text-muted">
+            Research briefing · NSE: {ticker}
+            {council?.as_of && ` · ${new Date(council.as_of).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`}
+          </span>
         </header>
 
         {error && <p className="mt-10 text-firewall">{error}</p>}

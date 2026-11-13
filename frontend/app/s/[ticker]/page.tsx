@@ -133,6 +133,12 @@ function CouncilPage() {
                 <span aria-hidden="true" className={`h-2 w-2 rounded-full ${st.phase === "done" ? "bg-verified" : st.phase === "error" ? "bg-firewall" : "animate-blink bg-neel"}`} />
                 {running ? <ShinyText text={HEADLINE[st.phase]} color="#4338CA" shineColor="#C7C3F4" speed={2.2} shineWidth={45} /> : HEADLINE[st.phase]}
               </span>
+              {st.asOf && st.asOf !== new Date().toLocaleDateString("en-CA") && (
+                <span className="text-sm text-ink-2">
+                  Briefing written {new Date(st.asOf).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} ·{" "}
+                  <a href={`/s/${ticker}?fresh=1`} className="font-medium text-neel underline">run today&apos;s</a>
+                </span>
+              )}
               {st.phase !== "error" && (
                 <span className="text-sm text-ink-2">
                   <CountUp to={doneCount} duration={0.6} trigger="load" /> of {AGENTS.length} agents done · <Elapsed t0={st.t0} running={running} />

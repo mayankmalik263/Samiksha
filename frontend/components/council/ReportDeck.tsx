@@ -38,7 +38,7 @@ function buildPages(agents: Record<AgentKey, AgentState>, ticker: string): Page[
   if (ok(e))
     pages.push({
       key: "earnings_call", kicker: "Research", title: "Earnings call", sub: "What management said on the latest call", tone: "ink",
-      lead: e!.tone?.claim ? `Tone: ${e!.tone.claim}` : undefined,
+      lead: e!.unavailable ? `${e!.unavailable} The other agents work from the annual report, financials and news.` : e!.tone?.claim ? `Tone: ${e!.tone.claim}` : undefined,
       sections: [
         { heading: "Highlights", items: e!.highlights.map(ev) },
         { heading: "Guidance", items: e!.guidance.map(ev) },
