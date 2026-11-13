@@ -44,14 +44,16 @@ def parse(text: str, schema: type[BaseModel]) -> BaseModel:
     raise ValueError(f"no valid {schema.__name__} JSON in model output" + (f": {errors[-1]}" if errors else ""))
 
 
-def chat_json(system: str, user: str, schema: type[BaseModel], example: str, retries: int = 1) -> BaseModel:
-    """example: a filled-in sample of the output. Qwen echoes raw JSON Schemas back, so we show an instance instead."""
+def chat_json(system: str, user: str, schema: type[BaseModel], example: str, retries: int = 1, think: bool = False) -> BaseModel:
+    """example: a filled-in sample of the output. Qwen echoes raw JSON Schemas back, so we show an instance instead.
+    think: Qwen's hidden reasoning was ~90% of tokens (140s vs ~15s) on extraction tasks; off unless an agent needs it."""
+    extra = {"chat_template_kwargs": {"enable_thinking": think}}
     messages = [
         {"role": "system", "content": f"{system}\n\nReply with ONLY one JSON object shaped exactly like this example (no schema, no prose):\n{example}"},
         {"role": "user", "content": user},
     ]
     for attempt in range(retries + 1):
-        out = client.chat.completions.create(model=MODEL, messages=messages, temperature=0.2).choices[0].message.content or ""
+        out = client.chat.completions.create(model=MODEL, messages=messages, temperature=0.2, extra_body=extra).choices[0].message.content or ""
         try:
             return parse(out, schema)
         except ValueError as e:

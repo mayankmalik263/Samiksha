@@ -13,21 +13,26 @@ DEMO_STOCKS = {
     "ITC": "ITC",
     "ADANIENT": "Adani Enterprises",
 }
-
-# ponytail: hard-coded synthetic doc for the Day 1 spine; Day 2 replaces it with real ingestion + RAG.
-SAMPLE_DOCS = [{
-    "source": "sample-synthetic-note",
-    "text": "SYNTHETIC SAMPLE (not real data). Revenue grew 9% year on year to Rs 1,000 crore. "
-            "Operating margin fell from 21% to 18%. Net debt rose to Rs 300 crore. "
-            "Promoters have pledged 4% of their holding. The auditor flagged no qualifications.",
-}]
+DISCLAIMER = "Educational. Not investment advice."
 
 app = FastAPI(title="Samiksha")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
 
 
-class AnalyzeRequest(BaseModel):
-    ticker: str
+def _ticker(raw: str) -> str:
+    ticker = raw.strip().upper()
+    if ticker not in DEMO_STOCKS:
+        raise HTTPException(404, f"Unknown ticker. Try one of: {', '.join(DEMO_STOCKS)}")
+    return ticker
+
+
+def _run(fn, *args):
+    try:
+        return fn(*args)
+    except FileNotFoundError as e:  # stock not ingested yet
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"LLM call failed: {e}")
 
 
 @app.get("/stocks")
@@ -42,25 +47,15 @@ class AskRequest(BaseModel):
 
 @app.post("/ask")
 def ask(req: AskRequest):
-    ticker = req.ticker.strip().upper()
-    if ticker not in DEMO_STOCKS:
-        raise HTTPException(404, f"Unknown ticker. Try one of: {', '.join(DEMO_STOCKS)}")
-    try:
-        result = agents.ask(ticker, req.question[:500])
-    except FileNotFoundError as e:
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"LLM call failed: {e}")
-    return {"ticker": ticker, **result.model_dump(), "disclaimer": "Educational. Not investment advice."}
+    ticker = _ticker(req.ticker)
+    return {"ticker": ticker, **_run(agents.ask, ticker, req.question[:500]).model_dump(), "disclaimer": DISCLAIMER}
+
+
+class AnalyzeRequest(BaseModel):
+    ticker: str
 
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
-    ticker = req.ticker.strip().upper()
-    if ticker not in DEMO_STOCKS:
-        raise HTTPException(404, f"Unknown ticker. Try one of: {', '.join(DEMO_STOCKS)}")
-    try:
-        result = agents.fundamentals(DEMO_STOCKS[ticker], SAMPLE_DOCS)
-    except Exception as e:
-        raise HTTPException(502, f"LLM call failed: {e}")
-    return {"ticker": ticker, "fundamentals": result, "disclaimer": "Educational. Not investment advice."}
+    ticker = _ticker(req.ticker)
+    return {"ticker": ticker, "fundamentals": _run(agents.fundamentals, ticker, DEMO_STOCKS[ticker]), "disclaimer": DISCLAIMER}
