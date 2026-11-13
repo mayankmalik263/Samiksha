@@ -187,6 +187,14 @@ fw = guardrail.firewall({"briefing": {"bottom_line": kept, "_blocked": cut}})
 assert "_blocked" not in fw["briefing"] and fw["guardrail"]["blocked"][0]["where"] == ".briefing.bottom_line"
 assert agents._verdict_check(fs)(agents.Verdict(bottom_line="Debt is 12% higher.", what_to_watch=[]))
 
+# A debate argument may name a period ("in FY2026") that another verified finding gives, but not invent one or a number.
+fy = [agents.Finding(claim="Profit was Rs 10 crore in FY2026", quote="Rs 10 crore", ref="E1", verified=True),
+      agents.Finding(claim="Net interest margin was 3.34%", quote="3.34 per cent", ref="E2", verified=True)]
+ok, bad_year, bad_num = agents._resolve([agents.Argument(point="NIM was 3.34% in FY2026.", refs=["F2"]),
+                                         agents.Argument(point="NIM was 3.34% in FY2027.", refs=["F2"]),
+                                         agents.Argument(point="NIM rose 12% in FY2026.", refs=["F2"])], fy)
+assert ok.verified and not bad_year.verified and not bad_num.verified, (ok.issue, bad_year.issue, bad_num.issue)
+
 # No briefing today -> the most recent one is served with its date, without any model call (demo-day safety).
 old = rag.DATA / "INFY" / "briefing-2026-11-01.json"
 old.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +204,8 @@ ev = sse(c.get("/analyze/stream", params={"ticker": "INFY"}))
 assert ev[1] == {"type": "cached", "as_of": "2026-11-01"} and ev[-1]["council"]["as_of"] == "2026-11-01" and len(calls) == n
 h = c.get("/health").json()
 assert h["ok"] and h["latest_briefing"]["INFY"] == "2026-11-01" and h["latest_briefing"]["ITC"] is None
+fw = c.get("/firewall").json()["stocks"]  # landing-page numbers come from the cached briefings, never hard-coded
+assert [s["ticker"] for s in fw] == ["INFY"] and fw[0]["as_of"] == "2026-11-01" and "passed" in fw[0]
 
 # No public transcript (ITC) -> an honest "unavailable", not a failure that would stop the briefing caching.
 _search = rag.search

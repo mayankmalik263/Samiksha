@@ -58,6 +58,18 @@ class AskRequest(BaseModel):
     question: str
 
 
+@app.get("/firewall")
+def firewall():
+    """What the firewall did in each stock's latest cached briefing, for the landing page. Reads files only: a page view
+    never starts a council."""
+    out = []
+    for t in DEMO_STOCKS:
+        if f := agents.latest_briefing(t):
+            g = json.loads(f.read_text("utf-8"))["guardrail"]
+            out.append({"ticker": t, "as_of": f.stem.removeprefix("briefing-"), "passed": g["passed"], "blocked": g["blocked"]})
+    return {"stocks": out}
+
+
 @app.post("/ask")
 def ask(req: AskRequest):
     ticker = _ticker(req.ticker)

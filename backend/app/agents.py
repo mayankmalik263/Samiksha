@@ -76,6 +76,19 @@ a SHORT exact span (3-12 words) copied character-for-character from that excerpt
 Use numbers exactly as written in the excerpt. Use only the excerpts; never invent numbers.
 Plain English for a first-time investor. Never recommend buying, selling or holding; no target price, no rating."""
 
+# The house style: Simplified Technical English, about 80% of ASD-STE100 (the controlled language written for aircraft
+# maintenance manuals). Short, literal sentences are easier to read and easier to check against a quote. Not 100%: the
+# strict approved dictionary has no words for "constant currency" or "net interest margin".
+WRITING = """Write every sentence in Simplified Technical English (ASD-STE100 style), for a reader whose first language may not be English:
+- One idea per sentence. At most 20 words per sentence; split longer ones.
+- Active voice. Name who acts ("Management expects...", "Revenue fell..."), not "It is expected..." or "was driven by".
+- Simple, common words. Use one word for one meaning, every time (say "revenue", not also "sales" or "top line").
+- No idioms, metaphors or filler: no "headwinds", "robust", "going forward", "amid", "signals", "significant", "notably".
+- Keep a financial term when it is the exact name (constant currency, net interest margin, free cash flow, NPA, TCV).
+- Keep every item limit above. Shorter sentences never mean more items: put one fact in each item."""
+
+QUOTE_RULE += "\n" + WRITING
+
 
 def _evidence_in(obj: BaseModel) -> list[Evidence]:
     found = []
@@ -242,7 +255,9 @@ NEWS_EXAMPLE = """{"company": "Example Ltd", "events": [{"claim": "The company w
 
 
 def news(ticker: str, company: str) -> News:
-    return _analyst(company, rag.docs(ticker, "news"), NEWS_SYSTEM, News, NEWS_EXAMPLE)
+    out = _analyst(company, rag.docs(ticker, "news"), NEWS_SYSTEM, News, NEWS_EXAMPLE)
+    out.events = out.events[:5]  # the prompt asks for at most 5; hold the line in code (most material first)
+    return out
 
 
 # ---------- The debate: Bull vs Bear, rebuttals, Risk, Chief synthesizer ----------
@@ -269,8 +284,12 @@ class Verdict(BaseModel):
 
 DEBATE_RULES = """You argue ONLY from the numbered verified findings given. Every argument cites 1-3 finding ids in "refs" (e.g. ["F2","F9"]).
 Use numbers exactly as they appear in the findings; never add new numbers. One or two short sentences per argument.
+Never calculate: no growth rate, percentage, difference or ratio you work out yourself. Cite every finding whose number you use.
+Corroborate: in most arguments, cite 2 findings of DIFFERENT kinds (each finding shows its kind: annual report, earnings call,
+financials, news). Example: a margin from the financials plus what management said about it on the earnings call.
 You argue about the BUSINESS (growth, profits, balance sheet, management, news), never about whether to buy the stock.
-Never recommend buying, selling or holding; no rating, no target price, no "undervalued/overvalued"."""
+Never recommend buying, selling or holding; no rating, no target price, no "undervalued/overvalued".
+""" + WRITING
 
 BULL_SYSTEM = f"""You are the Bull analyst on Samiksha. Make the strongest HONEST case that the business is in good shape:
 3-4 arguments, strongest first. Don't exaggerate or ignore what the findings say.
@@ -291,15 +310,24 @@ and what could make the bear case worse (or prove it wrong)? 3-4 risks, most imp
 SYNTH_SYSTEM = """You are the Chief synthesizer on Samiksha, an educational research desk. You get verified findings and the bull and bear arguments.
 "bottom_line" = 2-3 plain-English sentences that weigh the strongest bull point against the strongest bear point, for a first-time investor.
 "what_to_watch" = 2-4 short, concrete things to monitor next (results, guidance, events).
-Never tell the reader to buy, sell or hold; no rating, no target price, no "good/bad investment" verdict. Inform, don't advise."""
+Never tell the reader to buy, sell or hold; no rating, no target price, no "good/bad investment" verdict. Inform, don't advise.
+""" + WRITING
 
-CASE_EXAMPLE = """{"arguments": [{"point": "Margins are at a four-year high of 25.0% while debt stays small.", "refs": ["F2", "F6"]}]}"""
+CASE_EXAMPLE = """{"arguments": [{"point": "The operating margin is 25.0%, a four-year high. Management expects it to stay in the 24-26% band.", "refs": ["F2", "F14"]}]}"""
 REBUTTAL_EXAMPLE = """{"arguments": [{"answers": "A1", "point": "The revenue dip came from one large contract ending, not lost clients.", "refs": ["F1", "F3"]}]}"""
-SYNTH_EXAMPLE = """{"bottom_line": "Example Ltd is growing profitably with little debt, but its home market shrank and management sounded cautious about the next two quarters.", "what_to_watch": ["Whether next quarter's deal wins hold up", "Any change in margin guidance"]}"""
+SYNTH_EXAMPLE = """{"bottom_line": "Example Ltd grows its profit and has little debt. But its home market shrank, and management expects two slow quarters.", "what_to_watch": ["Whether next quarter's deal wins hold up", "Any change in margin guidance"]}"""
+
+
+_KINDS = (("annual-report", "annual report"), ("concall", "earnings call"), ("yfinance", "financials"), ("news", "news"))
+
+
+def _kind(source: str) -> str:
+    """The kind of document a finding comes from, in the words the debaters are asked to mix (see Evidence.tsx)."""
+    return next((k for prefix, k in _KINDS if source.startswith(prefix)), "filing")
 
 
 def _findings_text(findings: list[Finding]) -> str:
-    return "\n".join(f"[F{i}] {f.claim} ({f.source})" for i, f in enumerate(findings, 1))
+    return "\n".join(f"[F{i}] ({_kind(f.source)}) {f.claim}" for i, f in enumerate(findings, 1))
 
 
 def _args_text(args: list[Argument]) -> str:
@@ -307,7 +335,10 @@ def _args_text(args: list[Argument]) -> str:
 
 
 def _resolve(args: list[Argument], findings: list[Finding]) -> list[Argument]:
-    """Attach the cited findings as sources; verified only if refs are real and no number is invented."""
+    """Attach the cited findings as sources; verified only if refs are real and no number is invented.
+    A year is a period, not a fact: "in FY2026" passes if FY2026 appears in any verified finding, cited or not."""
+    everything = " ".join(f"{f.claim} {f.quote}" for f in findings)
+    periods = {n for n in guardrail.numbers(everything) if re.fullmatch(r"(19|20)\d\d", n)} | guardrail._years(everything)
     for a in args:
         ids = [int(m.group(1)) for r in a.refs if (m := re.fullmatch(r"F(\d+)", r)) and 1 <= int(m.group(1)) <= len(findings)]
         cited = [findings[i - 1] for i in dict.fromkeys(ids)]
@@ -315,7 +346,7 @@ def _resolve(args: list[Argument], findings: list[Finding]) -> list[Argument]:
         support = " ".join(f"{f.claim} {f.quote}" for f in cited)
         if not cited:
             a.issue = "cites no verified finding"
-        elif bad := guardrail.unsupported_numbers(a.point, support):
+        elif bad := guardrail.unsupported_numbers(a.point, support) - periods:
             a.issue = f"number(s) {', '.join(sorted(bad))} not in the cited findings"
         else:
             a.verified = True
@@ -324,7 +355,7 @@ def _resolve(args: list[Argument], findings: list[Finding]) -> list[Argument]:
 
 def _debater(system: str, user: str, findings: list[Finding], example: str = CASE_EXAMPLE) -> list[Argument]:
     case = chat_json(system, user, Case, example, check=_advice_check)
-    return _resolve(case.arguments, findings)
+    return _resolve(case.arguments[:4], findings)  # prompts ask for at most 4 (rebuttals 2), strongest first; hold the line
 
 
 def _rebut(side: str, base: str, opponent: list[Argument], findings: list[Finding]) -> list[Argument]:
