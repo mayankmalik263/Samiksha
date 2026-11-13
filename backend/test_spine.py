@@ -25,4 +25,13 @@ assert r.status_code == 200, r.text
 assert r.json()["fundamentals"]["points"][0]["source"] == "sample-synthetic-note"
 assert len(calls) == 2
 assert c.post("/analyze", json={"ticker": "PUMPDUMP"}).status_code == 404
+
+# Grounding check: a real quote is verified, a made-up one is not.
+from app import rag
+
+rag.search = lambda t, q, k=6: [{"source": "ar p.5", "url": "u#page=5", "text": "Total  Debt\nRs 9,000 crore"}]
+REPLY = '{"answer":"x","evidence":[{"quote":"total debt rs 9,000 crore","source":"[ar p.5]"},{"quote":"Debt is zero","source":"ar p.5"}]}'
+r = c.post("/ask", json={"ticker": "TCS", "question": "debt?"}).json()
+assert [e["verified"] for e in r["evidence"]] == [True, False], r
+assert r["evidence"][0]["url"] == "u#page=5"
 print("spine ok")

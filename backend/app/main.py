@@ -35,6 +35,25 @@ def stocks():
     return DEMO_STOCKS
 
 
+class AskRequest(BaseModel):
+    ticker: str
+    question: str
+
+
+@app.post("/ask")
+def ask(req: AskRequest):
+    ticker = req.ticker.strip().upper()
+    if ticker not in DEMO_STOCKS:
+        raise HTTPException(404, f"Unknown ticker. Try one of: {', '.join(DEMO_STOCKS)}")
+    try:
+        result = agents.ask(ticker, req.question[:500])
+    except FileNotFoundError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"LLM call failed: {e}")
+    return {"ticker": ticker, **result.model_dump(), "disclaimer": "Educational. Not investment advice."}
+
+
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
     ticker = req.ticker.strip().upper()
