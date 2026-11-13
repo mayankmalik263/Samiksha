@@ -123,6 +123,27 @@ n = len(calls)
 assert c.post("/analyze", json={"ticker": "TCS"}).json()["council"] == first
 assert len(calls) == n  # cache hit
 
+# 2b) The live stream: one firewalled event per agent as it lands, then the full briefing. Cached -> "cached" marker.
+import json  # noqa: E402
+
+
+def sse(r):
+    return [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
+
+
+ev = sse(c.get("/analyze/stream", params={"ticker": "tcs"}))
+assert [e["type"] for e in ev] == ["hello", "cached", "done"] and ev[-1]["council"] == first
+replies.update({"Fundamentals": [FUND], "Earnings-call": [EARN], "News analyst": [NEWS], "Bull analyst": [BULL],
+                "Bear analyst": [BEAR], "Bull rebuttal": [BULL_REB], "Bear rebuttal": [BULL_REB],
+                "Risk analyst": [RISK], "Chief synthesizer": [SYNTH]})
+ev = sse(c.get("/analyze/stream", params={"ticker": "TCS", "fresh": True}))
+done = {e["agent"]: e for e in ev if e["type"] == "agent" and e["status"] == "done"}
+assert set(done) == {"fundamentals", "earnings_call", "news", "bull_case", "bear_case", "bull_rebuttals",
+                     "bear_rebuttals", "risks", "chief"}, done.keys()
+assert [a["point"] for a in done["bull_case"]["data"]] == ["Debt is only Rs 9,000 crore"]  # firewalled before streaming
+assert done["fundamentals"]["data"]["red_flags"] == [] and ev[-1]["type"] == "done"
+assert c.get("/analyze/stream", params={"ticker": "PUMPDUMP"}).status_code == 404
+
 # 3) One debater failing (seen live: BharatCode 503) -> the rest of the debate still returns, flagged, not cached.
 def flaky_create(**kw):
     if who(kw["messages"][0]["content"]) == "Bear analyst":

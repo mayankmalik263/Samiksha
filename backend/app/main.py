@@ -1,5 +1,10 @@
+import json
+import queue
+import threading
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import agents, guardrail
@@ -61,3 +66,43 @@ class AnalyzeRequest(BaseModel):
 def analyze(req: AnalyzeRequest):
     ticker = _ticker(req.ticker)
     return {"ticker": ticker, "council": _run(agents.council, ticker, DEMO_STOCKS[ticker], req.fresh), "disclaimer": DISCLAIMER}
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@app.get("/analyze/stream")
+def analyze_stream(ticker: str, fresh: bool = False):
+    """Server-sent events: one event per agent as it finishes (already firewalled), then the full briefing.
+    Events: start | cached | agent {agent, status: running|done|error, seconds, data} | done {council} | error {status, detail}."""
+    ticker = _ticker(ticker)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            council = agents.council(ticker, DEMO_STOCKS[ticker], fresh, events.put)
+            events.put({"type": "done", "ticker": ticker, "company": DEMO_STOCKS[ticker], "council": council,
+                        "disclaimer": DISCLAIMER})
+        except FileNotFoundError as e:  # stock not ingested yet
+            events.put({"type": "error", "status": 409, "detail": str(e)})
+        except Exception as e:
+            events.put({"type": "error", "status": 502, "detail": f"LLM call failed: {e}"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()  # ponytail: the run continues if the browser leaves; it still caches
+
+    def stream():
+        yield _sse({"type": "hello", "ticker": ticker, "company": DEMO_STOCKS[ticker]})
+        while True:
+            try:
+                event = events.get(timeout=15)
+            except queue.Empty:
+                yield ": keep-alive\n\n"  # BharatCode can be slow; keep proxies from closing the connection
+                continue
+            if event is None:
+                return
+            yield _sse(event)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

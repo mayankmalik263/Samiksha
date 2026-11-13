@@ -7,9 +7,10 @@ short quotes and capped list sizes keep output small; analysts run concurrently;
 """
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Callable, Literal
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import AfterValidator, BaseModel
@@ -305,42 +306,69 @@ def _rebut(side: str, base: str, opponent: list[Argument], findings: list[Findin
     return _debater(system, f"{base}\n\nOpposing arguments:\n{_args_text(opponent)}", findings, REBUTTAL_EXAMPLE)
 
 
-def debate(company: str, findings: list[Finding]) -> dict:
+Emit = Callable[[dict], None]  # progress events for the live UI (see main.py /analyze/stream)
+
+
+def _noop(event: dict) -> None:
+    pass
+
+
+def _section(name: str, value) -> object:
+    """Firewall one agent's output on its own, so streamed partial results obey the same rules as the final JSON."""
+    return guardrail.firewall({name: jsonable_encoder(value)})[name]
+
+
+def _round(pool, jobs: dict, emit: Emit, errors: dict, t0: float) -> dict:
+    """Run jobs {name: (fn, *args)} in parallel; emit each result the moment it lands. Failures are isolated."""
+    futures = {pool.submit(*job): name for name, job in jobs.items() if job}
+    for name in jobs:
+        emit({"type": "agent", "agent": name, "status": "running"})
+    results = {}
+    for fut in as_completed(futures):
+        name = futures[fut]
+        try:
+            results[name] = fut.result()
+            emit({"type": "agent", "agent": name, "status": "done", "seconds": round(time.time() - t0, 1),
+                  "data": _section(name, results[name])})
+        except Exception as e:  # each agent fails on its own (seen live: a 503 from BharatCode)
+            errors[name] = f"{type(e).__name__}: {e}"
+            emit({"type": "agent", "agent": name, "status": "error", "error": errors[name]})
+    return results
+
+
+def debate(company: str, findings: list[Finding], emit: Emit = _noop) -> dict:
     """Round 1: Bull and Bear in parallel. Round 2 (all parallel): both rebuttals, the Risk agent, the Chief synthesizer.
     Two LLM rounds after the analysts instead of four: speed is the constraint on BharatCode."""
     if not findings:
         raise ValueError("no verified findings to debate")
     base = f"Company: {company}\n\nVerified findings:\n{_findings_text(findings)}"
     errors: dict[str, str] = {}
-
-    def get(name, fut, default):  # each debater fails on its own (seen live: a 503 from BharatCode)
-        try:
-            return fut.result() if fut else default
-        except Exception as e:
-            errors[name] = f"{type(e).__name__}: {e}"
-            return default
-
+    t0 = time.time()
     with ThreadPoolExecutor(4) as pool:
-        bull = get("bull_case", pool.submit(_debater, BULL_SYSTEM, base, findings), [])
-        bear = get("bear_case", pool.submit(_debater, BEAR_SYSTEM, base, findings), [])
+        r1 = _round(pool, {"bull_case": (_debater, BULL_SYSTEM, base, findings),
+                           "bear_case": (_debater, BEAR_SYSTEM, base, findings)}, emit, errors, t0)
+        bull, bear = r1.get("bull_case", []), r1.get("bear_case", [])
         if not bull and not bear:
             raise ValueError(f"both debaters failed: {errors}")
         sides = f"\n\nBull arguments:\n{_args_text(bull)}\n\nBear arguments:\n{_args_text(bear)}"
-        bull_reb = pool.submit(_rebut, "Bull", base, bear, findings) if bear else None
-        bear_reb = pool.submit(_rebut, "Bear", base, bull, findings) if bull else None
-        risk = pool.submit(_debater, RISK_SYSTEM, base + sides, findings)
-        verdict = get("bottom_line", pool.submit(chat_json, SYNTH_SYSTEM, base + sides, Verdict, SYNTH_EXAMPLE, check=_advice_check), None)
-        out = {
-            "bottom_line": verdict.bottom_line if verdict else "",
-            "bull_case": bull,
-            "bear_case": bear,
-            "bull_rebuttals": get("bull_rebuttals", bull_reb, []),  # bull answering the bear's arguments
-            "bear_rebuttals": get("bear_rebuttals", bear_reb, []),  # bear answering the bull's arguments
-            "risks": get("risks", risk, []),
-            "what_to_watch": verdict.what_to_watch if verdict else [],
-        }
+        r2 = _round(pool, {
+            "bull_rebuttals": (_rebut, "Bull", base, bear, findings) if bear else None,  # bull answering the bear
+            "bear_rebuttals": (_rebut, "Bear", base, bull, findings) if bull else None,  # bear answering the bull
+            "risks": (_debater, RISK_SYSTEM, base + sides, findings),
+            "chief": (chat_json, SYNTH_SYSTEM, base + sides, Verdict, SYNTH_EXAMPLE, 1, False, _advice_check),
+        }, emit, errors, t0)
+    verdict = r2.get("chief")
+    out = {
+        "bottom_line": verdict.bottom_line if verdict else "",
+        "bull_case": bull,
+        "bear_case": bear,
+        "bull_rebuttals": r2.get("bull_rebuttals", []),
+        "bear_rebuttals": r2.get("bear_rebuttals", []),
+        "risks": r2.get("risks", []),
+        "what_to_watch": verdict.what_to_watch if verdict else [],
+    }
     if errors:
-        out["errors"] = errors  # partial briefing: shown, but not cached
+        out["errors"] = {("bottom_line" if k == "chief" else k): v for k, v in errors.items()}  # partial: shown, not cached
     return out
 
 
@@ -349,22 +377,26 @@ def debate(company: str, findings: list[Finding]) -> dict:
 ANALYSTS = {"fundamentals": fundamentals, "earnings_call": earnings_call, "news": news}
 
 
-def council(ticker: str, company: str, fresh: bool = False) -> dict:
+def council(ticker: str, company: str, fresh: bool = False, emit: Emit = _noop) -> dict:
     cache = rag.DATA / ticker / f"briefing-{date.today()}.json"
     if cache.exists() and not fresh:
-        return json.loads(cache.read_text("utf-8"))
+        out = json.loads(cache.read_text("utf-8"))
+        emit({"type": "cached"})  # the UI replays a cached briefing at its own pace
+        return out
     rag.load(ticker)  # fail fast (409) if the stock isn't ingested, before spending LLM calls
+    emit({"type": "start"})
+    errors: dict[str, str] = {}
     with ThreadPoolExecutor(len(ANALYSTS)) as pool:  # LLM calls are I/O-bound; threads are enough
-        futures = {name: pool.submit(fn, ticker, company) for name, fn in ANALYSTS.items()}
+        results = _round(pool, {name: (fn, ticker, company) for name, fn in ANALYSTS.items()}, emit, errors, time.time())
     out, findings = {}, []
-    for name, fut in futures.items():
-        try:
-            out[name] = fut.result()
-            findings += [f for f in _evidence_in(out[name]) if isinstance(f, Finding) and f.verified]
-        except Exception as e:  # one analyst failing shouldn't sink the whole briefing
-            out[name] = {"error": f"{type(e).__name__}: {e}"}
+    for name in ANALYSTS:  # one analyst failing shouldn't sink the whole briefing
+        if name not in results:
+            out[name] = {"error": errors[name]}
+            continue
+        out[name] = results[name]
+        findings += [f for f in _evidence_in(out[name]) if isinstance(f, Finding) and f.verified]
     try:
-        out["briefing"] = debate(company, findings)
+        out["briefing"] = debate(company, findings, emit)
     except Exception as e:
         out["briefing"] = {"error": f"{type(e).__name__}: {e}"}
     out = guardrail.firewall(jsonable_encoder(out))  # nothing unverified or advisory leaves the server
