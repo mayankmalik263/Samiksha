@@ -1,0 +1,34 @@
+{
+  "brand": "Samiksha",
+  "tagline": "An AI research desk for Indian stocks",
+  "brief": "A council of AI analysts reads a company's annual report, earnings call and news, debates the bull and bear case, and writes a balanced, fully cited briefing. It informs and never advises (SEBI-safe): no buy/sell calls, every claim traced to its source.",
+  "adjectives": ["rigorous", "balanced", "transparent", "Indian"],
+  "criteria": "Success: says 'every claim is cited' at a glance, avoids trading clichés (bulls, bears, candlesticks, arrows, the rupee sign), reads at 16 px, works in one colour.",
+  "mockups": ["website", "app-icon", "favicon-tab", "social", "business-card", "sticker"],
+  "nav": ["Briefings", "How it works", "Compliance"],
+  "brand_color": "#4338CA",
+  "tile_color": "#4338CA",
+  "greyscale": false,
+  "final": true,
+  "designer": "Samiksha",
+  "concepts": [
+    {
+      "name": "Cited",
+      "symbol": "../logo/samiksha-symbol.svg",
+      "lockup": "../logo/samiksha-horizontal.svg",
+      "stacked": "../logo/samiksha-stacked.svg",
+      "avatar": "../logo/samiksha-symbol-small.svg",
+      "symbol_on_tile": "../logo/samiksha-symbol-reversed.svg",
+      "symbol_on_dark": "../logo/samiksha-symbol-reversed.svg",
+      "lockup_on_dark": "../logo/samiksha-horizontal-reversed.svg",
+      "idea": "Folded citation brackets hold three lines of a source; the highlighted line is the exact quote behind a claim.",
+      "rationale": [
+        "Says the product promise, 'nothing without a source', without drawing a chart or an animal",
+        "Neel and Haldi: two Indian dye colours; indigo for trust, turmeric for the highlighted quote",
+        "The haldi highlight repeats as the dot of the i in the custom wordmark and on every verified quote in the app"
+      ]
+    }
+  ],
+  "recommendation": "Cited in Neel & Haldi: ownable in Indian fintech (no one uses an indigo-turmeric pair), clear at 16 px with its small-size cut, and it seeds the product UI directly.",
+  "next_steps": ["Use the web icon set in the Next.js app (Day 6)", "Trademark search before public launch", "Apply the palette tokens to the UI"]
+}
