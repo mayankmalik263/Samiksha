@@ -8,15 +8,16 @@
 import { AnimatePresence, motion, useReducedMotion, type PanInfo } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Citation from "@/components/Citation";
+import EvidenceStrength, { evidenceSummary } from "@/components/Evidence";
 import CountUp from "@/components/reactbits/CountUp";
 import LatticeLoader from "@/components/reactbits/LatticeLoader";
 import type { AgentKey, AgentState, Argument, Chief, Council, EarningsCall, Evidence, Fundamentals, News } from "@/lib/council";
 
-type Section = { heading: string; items: { text: string; cite?: { source: string; url: string; quote: string; finding?: string }[]; flag?: string; answers?: string }[] };
-type Page = { key: string; kicker: string; title: string; sub: string; tone: "ink" | "neel" | "haldi" | "verdict"; sections: Section[]; lead?: string; watch?: string[] };
+type Section = { heading: string; items: { text: string; cite?: { source: string; url: string; quote: string; finding?: string }[]; flag?: string; answers?: string; strength?: boolean }[] };
+type Page = { key: string; kicker: string; title: string; sub: string; tone: "ink" | "neel" | "haldi" | "verdict"; sections: Section[]; lead?: string; watch?: string[]; evidence?: ReturnType<typeof evidenceSummary> };
 
 const ev = (e: Evidence) => ({ text: e.claim ?? "", cite: [{ source: e.source, url: e.url, quote: e.quote }] });
-const arg = (a: Argument) => ({ text: a.point, cite: a.sources, answers: a.answers || undefined });
+const arg = (a: Argument) => ({ text: a.point, cite: a.sources, answers: a.answers || undefined, strength: true });
 const ok = (d: unknown) => !!d && typeof d === "object" && !("error" in (d as object));
 
 function buildPages(agents: Record<AgentKey, AgentState>, ticker: string): Page[] {
@@ -74,7 +75,11 @@ function buildPages(agents: Record<AgentKey, AgentState>, ticker: string): Page[
     pages.push({ key: "risks", kicker: "Stress test", title: "Where each side could be wrong", sub: "The Risk analyst", tone: "ink", sections: [{ heading: "Risks", items: risks.map(arg) }] });
   const chief = d("chief") as Chief | undefined;
   if (chief?.bottom_line)
-    pages.push({ key: "verdict", kicker: "Verdict", title: "The bottom line", sub: "From the Chief, weighing both sides. Never a buy or sell call.", tone: "verdict", lead: chief.bottom_line, watch: chief.what_to_watch, sections: [] });
+    pages.push({
+      key: "verdict", kicker: "Verdict", title: "The bottom line", sub: "From the Chief, weighing both sides. Never a buy or sell call.", tone: "verdict",
+      lead: chief.bottom_line, watch: chief.what_to_watch, sections: [],
+      evidence: evidenceSummary([bull, bear, risks].flatMap((x) => (Array.isArray(x) ? x : []))),
+    });
   return pages;
 }
 
@@ -121,6 +126,7 @@ function Sheet({ page, index, total, council }: { page: Page; index: number; tot
                   {it.answers && <span className="mr-1.5 font-mono text-[11px] text-muted">re {it.answers}</span>}
                   {it.text}
                   {it.cite?.map((c, j) => <Citation key={j} n={j + 1} item={c} tone={t.pill} />)}
+                  {it.strength && it.cite && <EvidenceStrength sources={it.cite} dark={dark} />}
                 </span>
               </li>
             ))}
@@ -140,6 +146,13 @@ function Sheet({ page, index, total, council }: { page: Page; index: number; tot
             ))}
           </ul>
         </section>
+      )}
+      {page.evidence && page.evidence.total > 0 && (
+        <p className="mt-9 text-sm text-lilac">
+          Evidence behind the debate: <span className="font-semibold text-ground">{page.evidence.corroborated}</span> of {page.evidence.total} arguments are
+          corroborated across different kinds of document, <span className="font-semibold text-ground">{page.evidence.supported}</span> more have several
+          citations. This rates the sourcing, not the stock.
+        </p>
       )}
       {dark && council && (
         <p className="mt-9 rounded-2xl bg-white/5 p-4 text-sm text-lilac">

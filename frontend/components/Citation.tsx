@@ -25,11 +25,15 @@ export function prettySource(s: string): string {
 export default function Citation({ n, item, tone = "neel" }: { n: number | string; item: CiteItem; tone?: "neel" | "haldi" }) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
+  const [below, setBelow] = useState(false); // flip under the pill when there's no room above (sticky header)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pillRef = useRef<HTMLAnchorElement>(null);
   const id = useId();
 
   const show = () => {
     if (timer.current) clearTimeout(timer.current);
+    const top = pillRef.current?.getBoundingClientRect().top ?? 999;
+    setBelow(top < 300); // ~card height + the 64px header
     setOpen(true);
   };
   const hide = () => {
@@ -50,6 +54,7 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
   return (
     <span className="relative inline-block align-[0.15em]" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
       <a
+        ref={pillRef}
         href={item.url || undefined}
         target="_blank"
         rel="noopener noreferrer"
@@ -64,12 +69,12 @@ export default function Citation({ n, item, tone = "neel" }: { n: number | strin
           <motion.span
             id={id}
             role="tooltip"
-            initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.94, y: 6 }}
+            initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.94, y: below ? -6 : 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, scale: 0.96, y: 4 }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, scale: 0.96, y: below ? -4 : 4 }}
             transition={reduce ? { duration: 0 } : { type: "spring", bounce: 0.1, duration: 0.28 }}
-            style={{ transformOrigin: "bottom center", translateX: "-50%" }}
-            className="absolute bottom-full left-1/2 z-50 mb-2 block w-[min(320px,80vw)] rounded-2xl border border-line bg-paper p-4 text-left shadow-[0_18px_50px_-12px_rgb(27_24_53/0.35)]"
+            style={{ transformOrigin: below ? "top center" : "bottom center", translateX: "-50%" }}
+            className={`absolute left-1/2 z-50 ${below ? "top-full mt-2" : "bottom-full mb-2"} block w-[min(320px,80vw)] rounded-2xl border border-line bg-paper p-4 text-left shadow-[0_18px_50px_-12px_rgb(27_24_53/0.35)]`}
           >
             <span className="flex items-center gap-2 font-mono text-[11px] text-muted">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 256 256">

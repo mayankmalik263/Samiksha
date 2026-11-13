@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Citation from "@/components/Citation";
+import EvidenceStrength from "@/components/Evidence";
 import AnimatedList from "@/components/reactbits/AnimatedList";
 import BorderGlow from "@/components/reactbits/BorderGlow";
 import CountUp from "@/components/reactbits/CountUp";
@@ -177,6 +178,7 @@ function Bubble({ a, side, idx, reply }: { a: Argument; side: "bull" | "bear"; i
         {a.sources.map((s, i) => (
           <Citation key={i} n={i + 1} item={s} tone={bull ? "neel" : "haldi"} />
         ))}
+        <EvidenceStrength sources={a.sources} />
       </div>
     </motion.div>
   );
@@ -295,6 +297,7 @@ export function Verdict({ chief, risks }: { chief: AgentState; risks: AgentState
               {a.sources.map((s, j) => (
                 <Citation key={j} n={j + 1} item={s} />
               ))}
+              <EvidenceStrength sources={a.sources} />
             </motion.li>
           ))}
         </ul>

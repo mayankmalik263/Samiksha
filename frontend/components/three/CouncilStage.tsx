@@ -176,7 +176,7 @@ function Seat({ seat, state, count, quote, still, tex, anchor }: SeatProps) {
 function Rig({ done, children }: { done: boolean; children: React.ReactNode }) {
   const g = useRef<THREE.Group>(null);
   const { viewport } = useThree();
-  const fit = Math.min(1, (viewport.width / 2) / (RX + 1.25), (viewport.height / 2) / (RY + 1.15));
+  const fit = Math.min(1, (viewport.width / 2) / (RX + 2.1), (viewport.height / 2) / (RY + 1.15)); // + room for the seat labels
   useFrame(({ camera }, dt) => {
     if (g.current) g.current.scale.setScalar(damp(g.current.scale.x, fit, 6, dt));
     camera.position.z = damp(camera.position.z, done ? 12.2 : 13, 1.5, dt);

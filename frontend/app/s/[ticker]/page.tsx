@@ -192,6 +192,11 @@ function CouncilPage() {
                 Read the report ↓
               </motion.button>
             )}
+            {st.phase === "done" && (
+              <Link href={`/s/${ticker}/share`} className="inline-flex min-h-12 items-center rounded-2xl border border-line-2 bg-paper px-5 font-medium text-ink transition-colors hover:border-neel/50">
+                Share this briefing
+              </Link>
+            )}
           </div>
         </section>
 

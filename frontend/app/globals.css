@@ -49,6 +49,9 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   background: var(--color-ground);
+  /* card glows (BorderGlow) reach past their cards; never let that scroll the page sideways on phones.
+     clip, not hidden: hidden would break the sticky header. */
+  overflow-x: clip;
 }
 ::selection { background: var(--color-haldi-tint); color: var(--color-ink); }
 :focus-visible { outline: 3px solid var(--color-neel); outline-offset: 2px; border-radius: 6px; }
@@ -72,4 +75,11 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+
+/* The share page prints as a clean one-pager. */
+@media print {
+  .no-print { display: none !important; }
+  html, body { background: #fff !important; }
+  @page { margin: 12mm; }
 }
